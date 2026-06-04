@@ -1,96 +1,128 @@
 # AI 辅助测试用例生成与导出工具
 
-这是一个面向 PyCharm 调试的最小可运行版本。
+一个基于 Streamlit 的本地测试用例生成工具。用户填写需求模板后，可以选择规则生成或 AI 生成测试用例，并导出 Excel。
 
-当前能力：
+当前版本：`v0.2.0`
 
-- 粘贴需求文本
-- 生成结构化测试用例
+## 功能简介
+
+- Streamlit 单页面入口
+- 需求模板输入：项目、模块、角色、前置条件、业务流程、验收标准、异常规则
+- 支持规则生成和 AI 生成
+- 支持 DeepSeek 和 OpenAI
+- 支持生成类型：
+  - 功能测试
+  - 接口测试
+  - Web UI 测试
+  - App 测试
 - 自动拆分业务流程中的多个功能点
-- 显示实际生成方式：AI 生成或规则生成
-- 支持 OpenAI 和 DeepSeek 两种 AI 服务商
-- AI 调用失败时显示回退原因
-- 页面预览测试用例
-- 导出 Excel
-- 无 API Key 时使用本地规则生成
-- 配置 `OPENAI_API_KEY` 后可切换为 AI 生成
+- 页面展示实际生成方式、服务商、模型、功能点数量和用例数量
+- 测试用例字段包含：用例编号、模块、功能点、标题、前置条件、测试数据、步骤、预期结果、优先级、类型、备注
+- 支持 Excel 导出
+- AI 调用失败时自动回退到规则生成，并显示回退原因
 
-## 在 PyCharm 中运行
+## 运行步骤
 
 1. 用 PyCharm 打开本目录。
-2. 创建 Python 虚拟环境。
+
+2. 创建并选择虚拟环境。
+
 3. 安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. 运行：
+4. 启动页面：
 
 ```bash
 streamlit run app.py
 ```
 
-Windows 下也可以直接运行：
+Windows 下也可以运行：
 
 ```bash
 run_app.bat
 ```
 
-5. 浏览器打开终端里显示的本地地址，通常是：
+5. 打开终端显示的地址，通常是：
 
 ```text
 http://localhost:8501
 ```
 
-## Streamlit 是什么
+`app.py` 底部保留了：
 
-`Streamlit` 是一个 Python 本地网页界面框架。它的作用是：不用单独写 HTML、CSS、JavaScript，也能用 Python 快速做出输入框、按钮、表格、下载按钮等网页控件。
+```python
+if __name__ == "__main__":
+    main()
+```
 
-本项目里：
+因此在 PyCharm 中也可以右键运行文件；但 Streamlit 项目更推荐使用 `streamlit run app.py`。
 
-- `st.text_area()` 负责显示需求输入框
-- `st.button()` 负责显示“生成测试用例”按钮
-- `st.dataframe()` 负责显示测试用例预览表格
-- `st.download_button()` 负责导出 Excel 文件
-- `st.sidebar` 负责左侧配置区
+## 环境变量
 
-## 如何判断是否真的调用了 AI
-
-页面生成后会显示 5 个指标：
-
-- `实际生成方式`：显示 `AI 生成` 才表示本次真的使用了 OpenAI API
-- `服务商`：显示本次选择的是 OpenAI、DeepSeek 还是规则生成
-- `识别功能点`：本次从需求里拆出的功能点数量
-- `测试用例数`：最终生成的用例数量
-- `模型`：AI 模式下使用的模型名
-
-如果选择了 `AI 生成`，但实际显示为 `规则生成`，说明 AI 调用没有成功。页面会展示回退原因。
-
-## 可选：启用 OpenAI
-
-方式一：在项目根目录创建 `.env` 文件：
+在项目根目录创建 `.env`，填写自己的 key：
 
 ```text
-OPENAI_API_KEY=你的 key
+OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 
-DEEPSEEK_API_KEY=你的 key
+DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-方式二：在系统环境变量或 PyCharm Run Configuration 里设置：
+说明：
 
-```text
-OPENAI_API_KEY=你的 key
-OPENAI_MODEL=gpt-4.1-mini
+- `.env` 存放真实 API Key，不要提交到 Git。
+- 未配置 API Key 时，选择 AI 生成会自动回退到规则生成。
+- 页面显示 `实际生成方式 = AI 生成（DeepSeek）` 或 `AI 生成（OpenAI）` 时，才表示本次真的调用了 AI。
 
-DEEPSEEK_API_KEY=你的 key
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+## 测试命令
+
+运行全部测试：
+
+```bash
+pytest
 ```
 
-如果不设置，工具会自动使用本地规则生成模式。
+或使用当前虚拟环境：
 
-注意：`.env` 已在 `.gitignore` 中排除，不应提交到 Git。
+```bash
+.\.venv\Scripts\python -m pytest
+```
+
+当前测试覆盖：
+
+- 需求拆分
+- 规则生成
+- AI JSON 数组提取和解析
+- Excel 导出
+
+## 功能截图
+
+截图占位：
+
+```text
+docs/screenshots/v0.2.0-home.png
+docs/screenshots/v0.2.0-result.png
+```
+
+后续可以在页面稳定后补充实际截图。
+
+## 后续优化计划
+
+- 页面表格支持编辑后再导出
+- 支持自定义 Excel 列名和列顺序
+- 支持上传需求文档并抽取文本
+- 支持保存常用测试模板
+- 增加更细的接口测试字段，例如请求方法、接口路径、请求体、响应断言
+- 增加更稳定的 AI 输出校验和错误提示
+
+暂不引入：
+
+- RAG
+- 数据库
+- FastAPI
+- 独立前端框架

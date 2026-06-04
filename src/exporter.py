@@ -19,14 +19,17 @@ def build_excel(cases: list[TestCase]) -> bytes:
     for case in cases:
         sheet.append(
             [
+                case.case_id,
                 case.module,
                 case.feature,
                 case.title,
                 case.precondition,
+                case.test_data,
                 case.steps,
                 case.expected_result,
                 case.priority,
                 case.case_type,
+                case.remark,
             ]
         )
 
@@ -47,7 +50,7 @@ def _style_sheet(sheet) -> None:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    widths = [16, 20, 30, 36, 42, 42, 10, 14]
+    widths = [14, 16, 20, 30, 36, 28, 42, 42, 10, 14, 28]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
 
@@ -57,4 +60,3 @@ def _style_sheet(sheet) -> None:
 
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-

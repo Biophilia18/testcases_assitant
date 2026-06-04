@@ -40,12 +40,16 @@ class RequirementItem:
     description: str
 
 
-def generate_rule_based_cases(requirement_text: str, cases_per_feature: int = 6) -> list[TestCase]:
+def generate_rule_based_cases(
+    requirement_text: str,
+    cases_per_feature: int = 6,
+    generation_type: str = "功能测试",
+) -> list[TestCase]:
     items = extract_requirement_items(requirement_text)
     cases: list[TestCase] = []
 
-    for item in items:
-        cases.extend(_build_cases_for_item(item, cases_per_feature))
+    for item_index, item in enumerate(items, start=1):
+        cases.extend(_build_cases_for_item(item, item_index, cases_per_feature, generation_type))
 
     return cases
 
@@ -67,92 +71,96 @@ def extract_requirement_items(requirement_text: str) -> list[RequirementItem]:
     return items or [RequirementItem(module="业务流程", feature="需求整体流程", description=requirement_text.strip())]
 
 
-def _build_cases_for_item(item: RequirementItem, cases_per_feature: int) -> list[TestCase]:
-    templates = [
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-正常流程验证",
-            precondition="用户已具备访问该功能的权限，测试环境和基础数据准备完成。",
-            steps=f"1. 进入{item.module}。\n2. 按需求执行：{item.description}\n3. 提交或保存操作结果。",
-            expected_result=f"系统正确完成{item.feature}，页面提示、数据状态与需求描述一致。",
-            priority="P1",
-            case_type="功能测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-必填项为空校验",
-            precondition="用户已进入对应功能页面。",
-            steps=f"1. 进入{item.feature}页面。\n2. 清空关键必填信息。\n3. 提交表单。",
-            expected_result="系统阻止提交，并给出明确的必填项校验提示。",
-            priority="P1",
-            case_type="异常测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-非法格式或异常数据校验",
-            precondition="用户已进入对应功能页面。",
-            steps=f"1. 在{item.feature}相关输入项中输入非法格式、超长内容或特殊字符。\n2. 提交表单。",
-            expected_result="系统按规则校验输入；非法数据不能提交，且不产生脏数据。",
-            priority="P2",
-            case_type="边界测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-无权限访问校验",
-            precondition="准备一个无该功能权限的用户账号。",
-            steps=f"1. 使用无权限账号登录系统。\n2. 尝试访问或执行{item.feature}。",
-            expected_result="系统限制访问或操作，并给出符合权限设计的提示。",
-            priority="P1",
-            case_type="权限测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-重复提交或重复操作校验",
-            precondition="用户已进入对应功能页面，数据处于可操作状态。",
-            steps=f"1. 执行{item.feature}。\n2. 在页面未完全返回前重复点击提交、保存或确认。\n3. 查看业务数据结果。",
-            expected_result="系统不应产生重复记录、重复扣费、重复状态流转等异常结果。",
-            priority="P2",
-            case_type="异常测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-结果查询与数据一致性校验",
-            precondition="已成功完成一次正常流程操作。",
-            steps=f"1. 完成{item.feature}正常操作。\n2. 返回列表、详情页或关联模块查询该数据。\n3. 刷新页面后再次核对。",
-            expected_result="列表、详情、关联数据和刷新后的状态保持一致。",
-            priority="P2",
-            case_type="功能测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-取消或返回后数据不落库校验",
-            precondition="用户已进入对应功能页面。",
-            steps=f"1. 输入部分业务数据。\n2. 点击取消、返回或关闭页面。\n3. 重新进入页面或查询列表。",
-            expected_result="未确认提交的数据不应被保存；页面状态符合产品设计。",
-            priority="P3",
-            case_type="异常测试",
-        ),
-        TestCase(
-            module=item.module,
-            feature=item.feature,
-            title=f"{item.feature}-多角色流程流转校验",
-            precondition="准备流程涉及的不同角色账号和测试数据。",
-            steps=f"1. 使用发起人账号完成{item.feature}。\n2. 切换到下一处理角色继续操作。\n3. 核对流程状态和待办数据。",
-            expected_result="流程节点、处理人、状态变化和通知结果符合需求。",
-            priority="P2",
-            case_type="流程测试",
-        ),
+def _build_cases_for_item(
+    item: RequirementItem,
+    item_index: int,
+    cases_per_feature: int,
+    generation_type: str,
+) -> list[TestCase]:
+    templates = _templates_for_generation_type(generation_type)
+    normalized_count = max(3, min(cases_per_feature, len(templates)))
+
+    cases: list[TestCase] = []
+    for case_index, template in enumerate(templates[:normalized_count], start=1):
+        case_id = f"TC-{item_index:02d}-{case_index:02d}"
+        cases.append(
+            TestCase(
+                case_id=case_id,
+                module=item.module,
+                feature=item.feature,
+                title=f"{item.feature}-{template['title']}",
+                precondition=template["precondition"].format(item=item),
+                test_data=template["test_data"].format(item=item),
+                steps=template["steps"].format(item=item),
+                expected_result=template["expected_result"].format(item=item),
+                priority=template["priority"],
+                case_type=template["case_type"],
+                remark=f"{generation_type}规则生成；需求片段：{item.description[:80]}",
+            )
+        )
+
+    return cases
+
+
+def _templates_for_generation_type(generation_type: str) -> list[dict[str, str]]:
+    if generation_type == "接口测试":
+        return [
+            _template("接口正常请求验证", "接口地址、鉴权信息和测试数据已准备。", "合法请求参数。", "1. 构造{item.feature}接口合法请求。\n2. 发送请求。\n3. 查看响应体和数据库结果。", "接口返回成功状态码；响应字段、业务状态和数据落库结果正确。", "P1", "接口测试"),
+            _template("必填参数缺失校验", "接口可正常访问。", "删除一个或多个必填参数。", "1. 构造缺失必填参数的请求。\n2. 发送请求。", "接口返回明确错误码和错误信息，不产生异常业务数据。", "P1", "异常测试"),
+            _template("参数类型和格式校验", "接口可正常访问。", "错误类型、非法格式、超长字符串。", "1. 将关键参数替换为非法格式。\n2. 发送请求。", "接口按规则拒绝非法参数，并返回可定位问题的错误信息。", "P2", "边界测试"),
+            _template("鉴权失败校验", "准备无效 token 或无权限账号。", "无效 token、过期 token、无权限 token。", "1. 使用异常鉴权信息请求接口。\n2. 查看响应。", "接口拒绝访问，不泄露敏感数据。", "P1", "权限测试"),
+            _template("重复请求幂等校验", "准备可重复提交的业务数据。", "相同请求体和请求标识。", "1. 连续发送两次相同请求。\n2. 查询业务结果。", "接口不产生重复业务结果，幂等处理符合设计。", "P2", "接口测试"),
+            _template("响应字段完整性校验", "接口返回数据已准备。", "合法查询条件。", "1. 请求{item.feature}接口。\n2. 校验响应字段、类型和空值。", "响应字段完整，字段类型和业务含义符合接口文档。", "P2", "接口测试"),
+        ]
+
+    if generation_type == "Web UI 测试":
+        return [
+            _template("页面正常流程验证", "用户已登录 Web 系统并具备访问权限。", "正常业务数据。", "1. 打开{item.module}页面。\n2. 执行{item.feature}。\n3. 保存或提交。", "页面提示、跳转、列表和详情数据符合需求。", "P1", "Web UI 测试"),
+            _template("表单必填校验", "用户已进入对应页面。", "空值。", "1. 清空必填项。\n2. 点击提交。", "页面展示明确校验提示，表单不提交。", "P1", "异常测试"),
+            _template("输入边界校验", "用户已进入对应页面。", "超长文本、特殊字符、边界数值。", "1. 输入边界或特殊数据。\n2. 提交表单。", "页面校验、提示和保存结果符合规则。", "P2", "边界测试"),
+            _template("无权限菜单和按钮校验", "准备无权限用户。", "无权限账号。", "1. 使用无权限账号登录。\n2. 查看菜单、按钮和页面访问结果。", "无权限入口不可见或不可操作，直接访问时被拦截。", "P1", "权限测试"),
+            _template("重复点击提交校验", "用户已进入可提交页面。", "正常业务数据。", "1. 连续快速点击提交按钮。\n2. 查看页面和业务数据。", "按钮防重复处理有效，不产生重复数据。", "P2", "异常测试"),
+            _template("刷新后数据一致性校验", "已完成一次正常操作。", "已保存的业务数据。", "1. 刷新页面。\n2. 返回列表和详情页核对。", "刷新后状态、列表和详情数据保持一致。", "P2", "功能测试"),
+        ]
+
+    if generation_type == "App 测试":
+        return [
+            _template("App 正常流程验证", "用户已登录 App，网络正常。", "正常业务数据。", "1. 打开 App。\n2. 进入{item.module}。\n3. 执行{item.feature}。", "App 页面展示、提交结果和数据状态符合需求。", "P1", "App 测试"),
+            _template("弱网场景校验", "可模拟弱网或断网。", "正常业务数据。", "1. 切换到弱网。\n2. 执行{item.feature}。\n3. 恢复网络后查看结果。", "App 有合理加载、失败或重试提示，数据不丢失不重复。", "P1", "兼容性测试"),
+            _template("返回和取消操作校验", "用户已进入功能页面。", "部分填写的数据。", "1. 输入部分数据。\n2. 点击返回或取消。\n3. 再次进入页面。", "页面状态和草稿保存策略符合产品设计。", "P2", "异常测试"),
+            _template("重复点击校验", "用户已进入可提交页面。", "正常业务数据。", "1. 快速重复点击提交。\n2. 查看结果页和业务记录。", "不产生重复提交，页面有合理防抖或加载状态。", "P2", "异常测试"),
+            _template("权限和登录态失效校验", "准备登录态失效或无权限账号。", "过期登录态、无权限账号。", "1. 模拟登录态失效。\n2. 执行{item.feature}。", "App 引导重新登录或拒绝访问，不展示敏感数据。", "P1", "权限测试"),
+            _template("多设备兼容校验", "准备不同系统版本或屏幕尺寸设备。", "正常业务数据。", "1. 在不同设备执行{item.feature}。\n2. 核对页面布局和结果。", "不同设备上核心流程可用，关键内容无遮挡。", "P3", "兼容性测试"),
+        ]
+
+    return [
+        _template("正常流程验证", "用户已具备访问该功能的权限，测试环境和基础数据准备完成。", "正常业务数据。", "1. 进入{item.module}。\n2. 按需求执行：{item.description}\n3. 提交或保存操作结果。", "系统正确完成{item.feature}，页面提示、数据状态与需求描述一致。", "P1", "功能测试"),
+        _template("必填项为空校验", "用户已进入对应功能页面。", "关键必填项为空。", "1. 进入{item.feature}页面。\n2. 清空关键必填信息。\n3. 提交表单。", "系统阻止提交，并给出明确的必填项校验提示。", "P1", "异常测试"),
+        _template("非法格式或异常数据校验", "用户已进入对应功能页面。", "非法格式、超长内容、特殊字符。", "1. 在{item.feature}相关输入项中输入非法格式、超长内容或特殊字符。\n2. 提交表单。", "系统按规则校验输入；非法数据不能提交，且不产生脏数据。", "P2", "边界测试"),
+        _template("无权限访问校验", "准备一个无该功能权限的用户账号。", "无权限账号。", "1. 使用无权限账号登录系统。\n2. 尝试访问或执行{item.feature}。", "系统限制访问或操作，并给出符合权限设计的提示。", "P1", "权限测试"),
+        _template("重复提交或重复操作校验", "用户已进入对应功能页面，数据处于可操作状态。", "正常业务数据。", "1. 执行{item.feature}。\n2. 在页面未完全返回前重复点击提交、保存或确认。\n3. 查看业务数据结果。", "系统不应产生重复记录、重复扣费、重复状态流转等异常结果。", "P2", "异常测试"),
+        _template("结果查询与数据一致性校验", "已成功完成一次正常流程操作。", "已保存的业务数据。", "1. 完成{item.feature}正常操作。\n2. 返回列表、详情页或关联模块查询该数据。\n3. 刷新页面后再次核对。", "列表、详情、关联数据和刷新后的状态保持一致。", "P2", "功能测试"),
     ]
 
-    normalized_count = max(3, min(cases_per_feature, len(templates)))
-    return templates[:normalized_count]
+
+def _template(
+    title: str,
+    precondition: str,
+    test_data: str,
+    steps: str,
+    expected_result: str,
+    priority: str,
+    case_type: str,
+) -> dict[str, str]:
+    return {
+        "title": title,
+        "precondition": precondition,
+        "test_data": test_data,
+        "steps": steps,
+        "expected_result": expected_result,
+        "priority": priority,
+        "case_type": case_type,
+    }
 
 
 def _split_requirement(requirement_text: str) -> list[str]:
