@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from src.models import TestCase
+from src.text_utils import normalize_steps
 
 
 ACTION_MODULES = {
@@ -91,7 +92,7 @@ def _build_cases_for_item(
                 title=f"{item.feature}-{template['title']}",
                 precondition=template["precondition"].format(item=item),
                 test_data=template["test_data"].format(item=item),
-                steps=template["steps"].format(item=item),
+                steps=normalize_steps(template["steps"].format(item=item)),
                 expected_result=template["expected_result"].format(item=item),
                 priority=template["priority"],
                 case_type=template["case_type"],

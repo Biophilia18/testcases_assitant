@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from src.env_loader import load_env_file
 from src.models import GenerationResult, TestCase
 from src.rule_based_generator import extract_requirement_items, generate_rule_based_cases
+from src.text_utils import normalize_steps
 
 
 BASE_SYSTEM_PROMPT = """你是资深软件测试工程师。请根据需求文本生成结构化测试用例。
@@ -228,7 +229,7 @@ def _parse_cases(raw_text: str) -> list[TestCase]:
                 title=str(item.get("title", "")).strip(),
                 precondition=str(item.get("precondition", "")).strip(),
                 test_data=str(item.get("test_data", "")).strip(),
-                steps=str(item.get("steps", "")).strip(),
+                steps=normalize_steps(str(item.get("steps", "")).strip()),
                 expected_result=str(item.get("expected_result", "")).strip(),
                 priority=str(item.get("priority", "P2")).strip(),
                 case_type=str(item.get("case_type", "功能测试")).strip(),

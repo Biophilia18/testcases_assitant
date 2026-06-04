@@ -32,4 +32,5 @@ def test_build_excel_contains_new_columns_and_data():
     assert row[0] == "TC-01-01"
     assert row[5] == "订单号：A001"
     assert row[10] == "示例"
-
+    assert row[2] == "查询订单-正常流程"
+    assert row[9] == "查询订单"

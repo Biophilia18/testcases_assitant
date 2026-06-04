@@ -6,7 +6,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from src.models import EXCEL_COLUMNS, TestCase
+from src.models import COLUMN_TO_FIELD, EXCEL_COLUMNS, TestCase
 
 
 def build_excel(cases: list[TestCase]) -> bytes:
@@ -17,21 +17,7 @@ def build_excel(cases: list[TestCase]) -> bytes:
     sheet.append(EXCEL_COLUMNS)
 
     for case in cases:
-        sheet.append(
-            [
-                case.case_id,
-                case.module,
-                case.feature,
-                case.title,
-                case.precondition,
-                case.test_data,
-                case.steps,
-                case.expected_result,
-                case.priority,
-                case.case_type,
-                case.remark,
-            ]
-        )
+        sheet.append([getattr(case, COLUMN_TO_FIELD[column]) for column in EXCEL_COLUMNS])
 
     _style_sheet(sheet)
 
@@ -50,8 +36,21 @@ def _style_sheet(sheet) -> None:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    widths = [14, 16, 20, 30, 36, 28, 42, 42, 10, 14, 28]
-    for index, width in enumerate(widths, start=1):
+    width_by_column = {
+        "用例编号": 14,
+        "模块": 16,
+        "功能点": 20,
+        "用例标题": 30,
+        "优先级": 10,
+        "前置条件": 36,
+        "测试数据": 28,
+        "操作步骤": 42,
+        "预期结果": 42,
+        "用例类型": 14,
+        "备注": 28,
+    }
+    for index, column in enumerate(EXCEL_COLUMNS, start=1):
+        width = width_by_column.get(column, 18)
         sheet.column_dimensions[get_column_letter(index)].width = width
 
     for row in sheet.iter_rows(min_row=2):

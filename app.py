@@ -4,7 +4,8 @@ import streamlit as st
 
 from src.ai_client import generate_cases, is_provider_configured
 from src.exporter import build_excel
-from src.models import EXCEL_COLUMNS, GenerationResult, TestCase
+from src.models import GenerationResult
+from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
 
 st.set_page_config(page_title="AI 测试用例助手", layout="wide")
@@ -92,12 +93,27 @@ def main() -> None:
 
     _render_generation_status(result)
 
-    st.subheader("测试用例预览")
-    st.dataframe(_to_table(result.cases), use_container_width=True, hide_index=True)
+    st.subheader("测试用例编辑")
+    st.caption("可直接修改单元格内容。导出 Excel 时会使用编辑后的表格。")
 
-    excel_bytes = build_excel(result.cases)
+    edited_rows = st.data_editor(
+        cases_to_rows(result.cases),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="editable_cases",
+    )
+    edited_cases = rows_to_cases(edited_rows)
+    warnings = find_case_warnings(edited_cases)
+
+    if warnings:
+        with st.expander(f"编辑检查：发现 {len(warnings)} 个提示"):
+            for warning in warnings:
+                st.warning(warning)
+
+    excel_bytes = build_excel(edited_cases)
     st.download_button(
-        "导出 Excel",
+        f"导出 Excel（{len(edited_cases)} 条）",
         data=excel_bytes,
         file_name="测试用例.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -143,28 +159,6 @@ def _render_generation_status(result: GenerationResult) -> None:
             st.code(result.fallback_reason)
     else:
         st.info(result.message)
-
-
-def _to_table(cases: list[TestCase]) -> list[dict[str, str]]:
-    rows = []
-    for case in cases:
-        rows.append(
-            {
-                EXCEL_COLUMNS[0]: case.case_id,
-                EXCEL_COLUMNS[1]: case.module,
-                EXCEL_COLUMNS[2]: case.feature,
-                EXCEL_COLUMNS[3]: case.title,
-                EXCEL_COLUMNS[4]: case.precondition,
-                EXCEL_COLUMNS[5]: case.test_data,
-                EXCEL_COLUMNS[6]: case.steps,
-                EXCEL_COLUMNS[7]: case.expected_result,
-                EXCEL_COLUMNS[8]: case.priority,
-                EXCEL_COLUMNS[9]: case.case_type,
-                EXCEL_COLUMNS[10]: case.remark,
-            }
-        )
-    return rows
-
 
 if __name__ == "__main__":
     main()
