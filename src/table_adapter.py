@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.models import COLUMN_TO_FIELD, EXCEL_COLUMNS, TestCase
+from src.quality_checker import issue_messages
 from src.text_utils import normalize_steps
 
 
@@ -45,26 +46,7 @@ def rows_to_cases(rows: Any) -> list[TestCase]:
 
 
 def find_case_warnings(cases: list[TestCase]) -> list[str]:
-    warnings: list[str] = []
-    seen_ids: set[str] = set()
-    duplicated_ids: set[str] = set()
-
-    for case in cases:
-        if case.case_id in seen_ids:
-            duplicated_ids.add(case.case_id)
-        seen_ids.add(case.case_id)
-
-        if not case.title:
-            warnings.append(f"{case.case_id} 缺少用例标题。")
-        if not case.steps:
-            warnings.append(f"{case.case_id} 缺少操作步骤。")
-        if not case.expected_result:
-            warnings.append(f"{case.case_id} 缺少预期结果。")
-
-    for case_id in sorted(duplicated_ids):
-        warnings.append(f"{case_id} 用例编号重复。")
-
-    return warnings
+    return issue_messages(cases)
 
 
 def _normalize_rows(rows: Any) -> list[dict[str, Any]]:

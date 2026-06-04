@@ -3,10 +3,11 @@ from __future__ import annotations
 from io import BytesIO
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from src.models import COLUMN_TO_FIELD, EXCEL_COLUMNS, TestCase
+from src.text_utils import normalize_steps
 
 
 def build_excel(cases: list[TestCase]) -> bytes:
@@ -17,7 +18,7 @@ def build_excel(cases: list[TestCase]) -> bytes:
     sheet.append(EXCEL_COLUMNS)
 
     for case in cases:
-        sheet.append([getattr(case, COLUMN_TO_FIELD[column]) for column in EXCEL_COLUMNS])
+        sheet.append([_cell_value(case, column) for column in EXCEL_COLUMNS])
 
     _style_sheet(sheet)
 
@@ -29,12 +30,21 @@ def build_excel(cases: list[TestCase]) -> bytes:
 def _style_sheet(sheet) -> None:
     header_fill = PatternFill("solid", fgColor="1F4E78")
     header_font = Font(color="FFFFFF", bold=True)
+    thin_border = Border(
+        left=Side(style="thin", color="D9E2F3"),
+        right=Side(style="thin", color="D9E2F3"),
+        top=Side(style="thin", color="D9E2F3"),
+        bottom=Side(style="thin", color="D9E2F3"),
+    )
     wrap_alignment = Alignment(wrap_text=True, vertical="top")
+    center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    sheet.row_dimensions[1].height = 28
     for cell in sheet[1]:
         cell.fill = header_fill
         cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin_border
+        cell.alignment = center_alignment
 
     width_by_column = {
         "用例编号": 14,
@@ -53,9 +63,37 @@ def _style_sheet(sheet) -> None:
         width = width_by_column.get(column, 18)
         sheet.column_dimensions[get_column_letter(index)].width = width
 
+    priority_fill = {
+        "P0": PatternFill("solid", fgColor="F4CCCC"),
+        "P1": PatternFill("solid", fgColor="FCE4D6"),
+        "P2": PatternFill("solid", fgColor="FFF2CC"),
+        "P3": PatternFill("solid", fgColor="E2F0D9"),
+    }
+    priority_col = EXCEL_COLUMNS.index("优先级") + 1
+
     for row in sheet.iter_rows(min_row=2):
+        sheet.row_dimensions[row[0].row].height = _estimate_row_height(row)
         for cell in row:
+            cell.border = thin_border
             cell.alignment = wrap_alignment
+        row[priority_col - 1].alignment = center_alignment
+        row[priority_col - 1].fill = priority_fill.get(str(row[priority_col - 1].value), PatternFill())
 
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
+
+
+def _cell_value(case: TestCase, column: str) -> str:
+    field_name = COLUMN_TO_FIELD[column]
+    value = getattr(case, field_name)
+    if field_name == "steps":
+        return normalize_steps(value)
+    return value
+
+
+def _estimate_row_height(row) -> int:
+    max_lines = 1
+    for cell in row:
+        value = str(cell.value or "")
+        max_lines = max(max_lines, value.count("\n") + 1)
+    return min(max(36, max_lines * 22), 120)

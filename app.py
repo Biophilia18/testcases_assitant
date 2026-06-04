@@ -4,7 +4,9 @@ import streamlit as st
 
 from src.ai_client import generate_cases, is_provider_configured
 from src.exporter import build_excel
-from src.models import GenerationResult
+from src.filename_utils import build_export_filename
+from src.models import GenerationResult, TestCase
+from src.quality_checker import check_cases
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
 
@@ -86,6 +88,18 @@ def main() -> None:
                 provider=provider,
                 generation_type=generation_type,
             )
+            st.session_state["export_filename"] = build_export_filename(
+                project_name=project_name,
+                business_module=business_module,
+                generation_type=generation_type,
+            )
+            st.session_state["last_requirement_text"] = requirement_text
+            st.session_state["last_generation_config"] = {
+                "mode": mode,
+                "provider": provider,
+                "generation_type": generation_type,
+                "cases_per_feature": cases_per_feature,
+            }
 
     result: GenerationResult | None = st.session_state.get("generation_result")
     if not result or not result.cases:
@@ -93,7 +107,10 @@ def main() -> None:
 
     _render_generation_status(result)
 
-    st.subheader("测试用例编辑")
+    _render_grouped_summary(result.cases)
+    _render_regenerate_panel(result)
+
+    st.subheader("全部用例编辑")
     st.caption("可直接修改单元格内容。导出 Excel 时会使用编辑后的表格。")
 
     edited_rows = st.data_editor(
@@ -115,7 +132,7 @@ def main() -> None:
     st.download_button(
         f"导出 Excel（{len(edited_cases)} 条）",
         data=excel_bytes,
-        file_name="测试用例.xlsx",
+        file_name=st.session_state.get("export_filename", "测试用例.xlsx"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -159,6 +176,96 @@ def _render_generation_status(result: GenerationResult) -> None:
             st.code(result.fallback_reason)
     else:
         st.info(result.message)
+
+
+def _render_grouped_summary(cases: list[TestCase]) -> None:
+    st.subheader("按功能点分组")
+    groups = _group_cases(cases)
+    if not groups:
+        st.info("暂无可分组的测试用例。")
+        return
+
+    tabs = st.tabs([f"{key}（{len(group)}）" for key, group in groups.items()])
+    for tab, (key, group) in zip(tabs, groups.items()):
+        with tab:
+            st.dataframe(cases_to_rows(group), use_container_width=True, hide_index=True)
+            issues = check_cases(group)
+            if issues:
+                st.caption(f"{key} 检查提示：{len(issues)} 个")
+
+
+def _render_regenerate_panel(result: GenerationResult) -> None:
+    st.subheader("单功能点重新生成")
+    groups = _group_cases(result.cases)
+    if not groups:
+        return
+
+    selected_group = st.selectbox("选择要重新生成的功能点", list(groups.keys()))
+    if st.button("重新生成所选功能点"):
+        config = st.session_state.get("last_generation_config", {})
+        selected_cases = groups[selected_group]
+        requirement_text = _build_regenerate_requirement(selected_group, selected_cases)
+
+        with st.spinner("正在重新生成所选功能点..."):
+            regenerated = generate_cases(
+                requirement_text=requirement_text,
+                mode=config.get("mode", "规则生成"),
+                cases_per_feature=config.get("cases_per_feature", 6),
+                provider=config.get("provider", "DeepSeek"),
+                generation_type=config.get("generation_type", "功能测试"),
+            )
+
+        kept_cases = [case for case in result.cases if _group_key(case) != selected_group]
+        merged_cases = _renumber_cases(kept_cases + regenerated.cases)
+        st.session_state["generation_result"] = GenerationResult(
+            cases=merged_cases,
+            requested_mode=result.requested_mode,
+            actual_mode=result.actual_mode,
+            provider=result.provider,
+            feature_count=len(_group_cases(merged_cases)),
+            case_count=len(merged_cases),
+            model=result.model,
+            message=f"已重新生成 {selected_group}，当前共 {len(merged_cases)} 条用例。",
+            fallback_reason=result.fallback_reason,
+        )
+        st.rerun()
+
+
+def _group_cases(cases: list[TestCase]) -> dict[str, list[TestCase]]:
+    groups: dict[str, list[TestCase]] = {}
+    for case in cases:
+        groups.setdefault(_group_key(case), []).append(case)
+    return groups
+
+
+def _group_key(case: TestCase) -> str:
+    module = case.module or "未指定模块"
+    feature = case.feature or "未指定功能点"
+    return f"{module} / {feature}"
+
+
+def _build_regenerate_requirement(group_key: str, cases: list[TestCase]) -> str:
+    case = cases[0]
+    return "\n".join(
+        [
+            f"只重新生成这个功能点：{group_key}",
+            f"模块：{case.module}",
+            f"功能点：{case.feature}",
+            "已有用例摘要：",
+            *[f"- {item.title}" for item in cases[:10]],
+            "要求：保留同一功能点语义，重新生成更完整、更可执行的测试用例。",
+        ]
+    )
+
+
+def _renumber_cases(cases: list[TestCase]) -> list[TestCase]:
+    groups = _group_cases(cases)
+    renumbered: list[TestCase] = []
+    for group_index, group in enumerate(groups.values(), start=1):
+        for case_index, case in enumerate(group, start=1):
+            case.case_id = f"TC-{group_index:02d}-{case_index:02d}"
+            renumbered.append(case)
+    return renumbered
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from src.env_loader import load_env_file
 from src.models import GenerationResult, TestCase
@@ -224,20 +225,28 @@ def _parse_cases(raw_text: str) -> list[TestCase]:
         cases.append(
             TestCase(
                 case_id=str(item.get("case_id", f"TC-{len(cases) + 1:03d}")).strip(),
-                module=str(item.get("module", "")).strip(),
-                feature=str(item.get("feature", "")).strip(),
-                title=str(item.get("title", "")).strip(),
-                precondition=str(item.get("precondition", "")).strip(),
-                test_data=str(item.get("test_data", "")).strip(),
-                steps=normalize_steps(str(item.get("steps", "")).strip()),
-                expected_result=str(item.get("expected_result", "")).strip(),
-                priority=str(item.get("priority", "P2")).strip(),
-                case_type=str(item.get("case_type", "功能测试")).strip(),
-                remark=str(item.get("remark", "")).strip(),
+                module=_field_text(item.get("module", "")),
+                feature=_field_text(item.get("feature", "")),
+                title=_field_text(item.get("title", "")),
+                precondition=_field_text(item.get("precondition", "")),
+                test_data=_field_text(item.get("test_data", "")),
+                steps=normalize_steps(item.get("steps", "")),
+                expected_result=_field_text(item.get("expected_result", "")),
+                priority=_field_text(item.get("priority", "P2")),
+                case_type=_field_text(item.get("case_type", "功能测试")),
+                remark=_field_text(item.get("remark", "")),
             )
         )
 
     return [case for case in cases if case.title and case.steps and case.expected_result]
+
+
+def _field_text(value: Any) -> str:
+    if isinstance(value, list):
+        return "；".join(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value or "").strip()
 
 
 def _extract_json_array(raw_text: str) -> str:
