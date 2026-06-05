@@ -9,6 +9,7 @@ from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
 from src.coverage_config import COVERAGE_TYPE_OPTIONS, DEFAULT_COVERAGE_TYPES, normalize_coverage_types
 from src.document_loader import load_requirement_document
 from src.exporter import build_excel
+from src.feature_selection import count_selected_rows, feature_items_to_rows, selected_rows_to_feature_source
 from src.filename_utils import build_export_filename
 from src.generation_preview import GenerationPreview, build_generation_preview
 from src.models import GenerationResult, TestCase
@@ -21,11 +22,19 @@ from src.persistence import (
 )
 from src.quality_score import QualityScore, calculate_quality_score
 from src.quality_checker import check_cases
+from src.regeneration import (
+    REGENERATION_FOCUS_OPTIONS,
+    build_regeneration_requirement,
+    coverage_types_for_focus,
+    replace_group_preserving_case_ids,
+)
 from src.requirement_parser import parse_requirement_text
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
 
 st.set_page_config(page_title="AI 测试用例助手", layout="wide")
+
+QUALITY_MATRIX_TYPES = ["正常流程", "异常场景", "边界/非法输入", "权限控制", "重复操作", "数据一致性", "状态流转"]
 
 
 def main() -> None:
@@ -52,35 +61,40 @@ def main() -> None:
             env_name = "DEEPSEEK_API_KEY" if provider == "DeepSeek" else "OPENAI_API_KEY"
             st.info(f"未检测到 {env_name}，AI 生成会自动回退到规则生成。")
 
-    input_tab, result_tab, quality_tab, export_tab = st.tabs(["需求输入", "生成结果", "质量检查", "导出"])
+        _render_history_loader()
 
-    with input_tab:
-        _render_input_tab(mode, provider, generation_type, selected_coverage_types)
+    _render_step_input(mode, provider, generation_type, selected_coverage_types)
+    _render_step_preview()
 
     result: GenerationResult | None = st.session_state.get("generation_result")
     if not result or not result.cases:
-        with result_tab:
-            st.info("暂无测试用例。请先生成或导入历史 JSON。")
+        st.subheader("Step 3：生成结果")
+        st.info("暂无测试用例。请先完成需求输入和生成计划预览。")
+        st.subheader("Step 4：编辑与质量检查")
+        st.info("生成测试用例后可在此编辑和检查质量。")
+        st.subheader("Step 5：保存与导出")
+        st.info("生成测试用例后可保存 JSON 或导出 Excel。")
         return
 
-    with result_tab:
-        _render_generation_status(result)
-        _render_quality_snapshot(result.cases, result.coverage_types)
-        _render_grouped_summary(result.cases, result.coverage_types)
-        _render_regenerate_panel(result)
-        _render_edit_table(result)
+    st.subheader("Step 3：生成结果")
+    _render_generation_status(result)
+    _render_quality_snapshot(result.cases, result.coverage_types)
+    _render_grouped_summary(result.cases, result.coverage_types)
 
     edited_cases = st.session_state.get("edited_cases", result.cases)
 
-    with quality_tab:
-        _render_quality_tab(edited_cases, result.coverage_types)
+    st.subheader("Step 4：编辑与质量检查")
+    _render_regenerate_panel(result)
+    _render_edit_table(result)
+    edited_cases = st.session_state.get("edited_cases", result.cases)
+    _render_quality_tab(edited_cases, result.coverage_types)
 
-    with export_tab:
-        _render_export_tab(edited_cases, result.coverage_types)
+    st.subheader("Step 5：保存与导出")
+    _render_export_tab(edited_cases, result.coverage_types)
 
 
-def _render_input_tab(mode: str, provider: str, generation_type: str, coverage_types: list[str]) -> None:
-    st.subheader("需求模板")
+def _render_step_input(mode: str, provider: str, generation_type: str, coverage_types: list[str]) -> None:
+    st.subheader("Step 1：需求输入")
     requirement_file = st.file_uploader(
         "上传需求文件（txt / md / docx）",
         type=["txt", "md", "docx"],
@@ -134,44 +148,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, coverage_t
         placeholder="例如：重复提交不得产生多条退款单；弱网下不能重复扣款；无权限用户不能审核。",
     )
 
-    preview_clicked = st.button("预览生成计划", type="primary")
-    load_col1, load_col2 = st.columns(2)
-    with load_col1:
-        if st.button("加载最近一次 JSON"):
-            try:
-                result, filename = load_latest_generation_result()
-                _set_generation_result(result, filename)
-                st.success("已加载最近一次生成结果。")
-                st.rerun()
-            except FileNotFoundError:
-                st.warning("还没有找到 outputs/latest_cases.json。")
-            except Exception as exc:
-                st.error(f"加载失败：{exc}")
-
-    with load_col2:
-        uploaded_file = st.file_uploader("导入历史 JSON", type=["json"])
-        if uploaded_file is not None:
-            try:
-                result, filename = load_generation_result_from_text(uploaded_file.read().decode("utf-8"))
-                _set_generation_result(result, filename)
-                st.success("已导入历史 JSON。")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"导入失败：{exc}")
-
-    history_files = list_history_files()
-    if history_files:
-        history_labels = [path.name for path in history_files]
-        selected_history = st.selectbox("选择本地历史 JSON", history_labels)
-        if st.button("加载所选历史 JSON"):
-            try:
-                selected_path = history_files[history_labels.index(selected_history)]
-                result, filename = load_generation_result_from_path(selected_path)
-                _set_generation_result(result, filename)
-                st.success(f"已加载 {selected_path.name}。")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"加载失败：{exc}")
+    preview_clicked = st.button("生成计划预览", type="primary")
 
     if preview_clicked:
         requirement_text = _build_requirement_text(
@@ -185,7 +162,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, coverage_t
             generation_type=generation_type,
         )
 
-        if not requirement_text.strip():
+        if not business_flow.strip():
             st.warning("请至少输入业务流程/需求描述。")
             return
 
@@ -201,24 +178,71 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, coverage_t
             "coverage_types": coverage_types,
         }
 
-    pending_generation = st.session_state.get("pending_generation")
-    if pending_generation:
-        preview = build_generation_preview(
-            pending_generation["requirement_text"],
-            pending_generation["cases_per_feature"],
-            feature_source_text=pending_generation.get("feature_source_text", ""),
-            coverage_types=pending_generation.get("coverage_types", []),
-        )
-        _render_generation_preview(preview)
 
-        confirm_col, cancel_col = st.columns(2)
-        with confirm_col:
-            if st.button("确认生成", type="primary"):
-                _run_confirmed_generation(pending_generation)
-        with cancel_col:
-            if st.button("取消预览"):
-                st.session_state.pop("pending_generation", None)
+def _render_history_loader() -> None:
+    with st.expander("历史 JSON", expanded=False):
+        if st.button("加载最近一次 JSON"):
+            try:
+                result, filename = load_latest_generation_result()
+                _set_generation_result(result, filename)
+                st.success("已加载最近一次生成结果。")
                 st.rerun()
+            except FileNotFoundError:
+                st.warning("还没有找到 outputs/latest_cases.json。")
+            except Exception as exc:
+                st.error(f"加载失败：{exc}")
+
+        uploaded_file = st.file_uploader("导入历史 JSON", type=["json"])
+        if uploaded_file is not None:
+            try:
+                result, filename = load_generation_result_from_text(uploaded_file.read().decode("utf-8"))
+                _set_generation_result(result, filename)
+                st.success("已导入历史 JSON。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"导入失败：{exc}")
+
+        history_files = list_history_files()
+        if history_files:
+            history_labels = [path.name for path in history_files]
+            selected_history = st.selectbox("选择本地历史 JSON", history_labels)
+            if st.button("加载所选历史 JSON"):
+                try:
+                    selected_path = history_files[history_labels.index(selected_history)]
+                    result, filename = load_generation_result_from_path(selected_path)
+                    _set_generation_result(result, filename)
+                    st.success(f"已加载 {selected_path.name}。")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"加载失败：{exc}")
+
+
+def _render_step_preview() -> None:
+    st.subheader("Step 2：生成计划预览")
+    pending_generation = st.session_state.get("pending_generation")
+    if not pending_generation:
+        st.info("填写需求后点击“生成计划预览”，这里会展示识别到的功能点。")
+        return
+
+    preview = build_generation_preview(
+        pending_generation["requirement_text"],
+        pending_generation["cases_per_feature"],
+        feature_source_text=pending_generation.get("feature_source_text", ""),
+        coverage_types=pending_generation.get("coverage_types", []),
+    )
+    selected_rows = _render_generation_preview(preview)
+    selected_count = count_selected_rows(selected_rows)
+    st.caption(f"当前选择参与生成的功能点：{selected_count} / {len(preview.feature_items)}")
+    st.caption(f"选择后预计用例数：{selected_count * preview.cases_per_feature}")
+
+    confirm_col, cancel_col = st.columns(2)
+    with confirm_col:
+        if st.button("确认生成", type="primary", disabled=selected_count == 0):
+            _run_confirmed_generation(pending_generation, selected_rows)
+    with cancel_col:
+        if st.button("取消预览"):
+            st.session_state.pop("pending_generation", None)
+            st.rerun()
 
 
 def _apply_uploaded_requirement(uploaded_file) -> None:
@@ -256,8 +280,7 @@ def _apply_uploaded_requirement(uploaded_file) -> None:
         st.warning("未识别到有效内容，请检查文件内容。")
 
 
-def _render_generation_preview(preview: GenerationPreview) -> None:
-    st.subheader("生成前预览")
+def _render_generation_preview(preview: GenerationPreview):
     col1, col2, col3 = st.columns(3)
     col1.metric("识别功能点", len(preview.feature_items))
     col2.metric("每功能点覆盖类型", preview.cases_per_feature)
@@ -268,13 +291,25 @@ def _render_generation_preview(preview: GenerationPreview) -> None:
     for warning in preview.warnings:
         st.warning(warning)
 
-    with st.expander("查看识别到的功能点", expanded=bool(preview.warnings)):
-        for index, item in enumerate(preview.feature_items, start=1):
-            st.write(f"{index}. {item.module} / {item.feature}")
-            st.caption(item.description[:160])
+    st.write("识别到的功能点")
+    return st.data_editor(
+        feature_items_to_rows(preview.feature_items),
+        use_container_width=True,
+        hide_index=True,
+        key=f"feature_selection_editor_{abs(hash(preview.feature_source_text))}",
+        column_config={
+            "参与生成": st.column_config.CheckboxColumn("参与生成"),
+            "需求片段": st.column_config.TextColumn("需求片段", width="large"),
+        },
+    )
 
 
-def _run_confirmed_generation(pending_generation: dict) -> None:
+def _run_confirmed_generation(pending_generation: dict, selected_rows=None) -> None:
+    feature_source_text = selected_rows_to_feature_source(selected_rows)
+    if not feature_source_text:
+        st.warning("请至少选择一个功能点参与生成。")
+        return
+
     with st.spinner("正在生成测试用例..."):
         result = generate_cases(
             requirement_text=pending_generation["requirement_text"],
@@ -282,7 +317,7 @@ def _run_confirmed_generation(pending_generation: dict) -> None:
             cases_per_feature=pending_generation["cases_per_feature"],
             provider=pending_generation["provider"],
             generation_type=pending_generation["generation_type"],
-            feature_source_text=pending_generation.get("feature_source_text", ""),
+            feature_source_text=feature_source_text,
             coverage_types=pending_generation.get("coverage_types", []),
         )
         export_filename = build_export_filename(
@@ -367,8 +402,9 @@ def _render_generation_status(result: GenerationResult) -> None:
 
 
 def _render_quality_snapshot(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
-    score = calculate_quality_score(cases, coverage_types)
-    matrix = build_coverage_matrix(cases, coverage_types)
+    matrix_types = _quality_matrix_types(coverage_types)
+    score = calculate_quality_score(cases, matrix_types)
+    matrix = build_coverage_matrix(cases, matrix_types)
     covered_count = sum(1 for item in matrix if item.covered)
 
     st.subheader("质量概览")
@@ -384,11 +420,11 @@ def _render_quality_snapshot(cases: list[TestCase], coverage_types: list[str] | 
 
 def _render_quality_tab(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
     st.subheader("生成质量报告")
-    selected_coverage_types = normalize_coverage_types(coverage_types)
-    score = calculate_quality_score(cases, selected_coverage_types)
-    matrix = build_coverage_matrix(cases, selected_coverage_types)
-    st.caption("覆盖检查：" + "、".join(selected_coverage_types))
-    issues = check_cases(cases, selected_coverage_types)
+    matrix_types = _quality_matrix_types(coverage_types)
+    score = calculate_quality_score(cases, matrix_types)
+    matrix = build_coverage_matrix(cases, matrix_types)
+    st.caption("覆盖检查：" + "、".join(matrix_types))
+    issues = check_cases(cases, matrix_types)
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("质量评分", score.score)
     col2.metric("总用例数", len(cases))
@@ -433,13 +469,34 @@ def _render_score_details(score: QualityScore) -> None:
 
 
 def _issue_summary_rows(issues) -> list[dict[str, str | int]]:
-    counter = Counter(_issue_category(issue.message) for issue in issues)
-    return [{"分类": category, "数量": count} for category, count in counter.items()]
+    grouped: dict[str, list] = {}
+    for issue in issues:
+        grouped.setdefault(_issue_category(issue.message), []).append(issue)
+
+    rows = []
+    for category, group in grouped.items():
+        case_ids = sorted({issue.case_id for issue in group if issue.case_id})
+        rows.append(
+            {
+                "分类": category,
+                "数量": len(group),
+                "涉及用例": "、".join(case_ids[:12]) if case_ids else "-",
+                "统一建议": _category_suggestion(category),
+            }
+        )
+    return rows
 
 
 def _warning_summary_rows(warnings: list[str]) -> list[dict[str, str | int]]:
     counter = Counter(_issue_category(warning) for warning in warnings)
-    return [{"分类": category, "数量": count} for category, count in counter.items()]
+    return [
+        {
+            "分类": category,
+            "数量": count,
+            "统一建议": _category_suggestion(category),
+        }
+        for category, count in counter.items()
+    ]
 
 
 def _issue_category(message: str) -> str:
@@ -454,6 +511,18 @@ def _issue_category(message: str) -> str:
     if message.startswith("缺少") and "用例" in message:
         return "覆盖缺口"
     return "其他"
+
+
+def _category_suggestion(category: str) -> str:
+    suggestions = {
+        "基础字段": "补齐必填字段，优先检查编号、标题、步骤、预期结果和优先级。",
+        "操作步骤": "补充可执行步骤，至少写清入口、操作动作和提交/查询动作。",
+        "预期结果": "写清页面提示、状态变化、数据记录或接口返回，不只写“成功/正常”。",
+        "测试数据": "补充账号、参数、边界值或业务数据编号。",
+        "覆盖缺口": "根据缺失覆盖项补充对应类型用例，优先补异常、边界、权限和数据一致性。",
+        "其他": "结合提示逐项复核。",
+    }
+    return suggestions.get(category, "结合提示逐项复核。")
 
 
 def _render_export_tab(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
@@ -510,10 +579,13 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
         return
 
     selected_group = st.selectbox("选择要重新生成的功能点", list(groups.keys()))
+    focus = st.selectbox("重新生成侧重点", REGENERATION_FOCUS_OPTIONS)
     if st.button("重新生成所选功能点"):
         config = st.session_state.get("last_generation_config", {})
         selected_cases = groups[selected_group]
-        requirement_text = _build_regenerate_requirement(selected_group, selected_cases)
+        full_requirement_text = st.session_state.get("last_requirement_text", "")
+        requirement_text = build_regeneration_requirement(selected_group, selected_cases, full_requirement_text, focus)
+        focused_coverage_types = coverage_types_for_focus(focus, config.get("coverage_types", result.coverage_types))
 
         with st.spinner("正在重新生成所选功能点..."):
             regenerated = generate_cases(
@@ -522,12 +594,11 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
                 cases_per_feature=config.get("cases_per_feature", 6),
                 provider=config.get("provider", "DeepSeek"),
                 generation_type=config.get("generation_type", "功能测试"),
-                feature_source_text=requirement_text,
-                coverage_types=config.get("coverage_types", []),
+                feature_source_text=f"{selected_cases[0].module}：{selected_cases[0].feature}",
+                coverage_types=focused_coverage_types,
             )
 
-        kept_cases = [case for case in result.cases if _group_key(case) != selected_group]
-        merged_cases = _renumber_cases(kept_cases + regenerated.cases)
+        merged_cases = replace_group_preserving_case_ids(result.cases, selected_group, regenerated.cases)
         merged_result = GenerationResult(
             cases=merged_cases,
             requested_mode=result.requested_mode,
@@ -551,34 +622,19 @@ def _group_cases(cases: list[TestCase]) -> dict[str, list[TestCase]]:
     return groups
 
 
+def _quality_matrix_types(coverage_types: list[str] | None = None) -> list[str]:
+    selected = normalize_coverage_types(coverage_types)
+    matrix_types = []
+    for coverage_type in QUALITY_MATRIX_TYPES + selected:
+        if coverage_type not in matrix_types:
+            matrix_types.append(coverage_type)
+    return matrix_types
+
+
 def _group_key(case: TestCase) -> str:
     module = case.module or "未指定模块"
     feature = case.feature or "未指定功能点"
     return f"{module} / {feature}"
-
-
-def _build_regenerate_requirement(group_key: str, cases: list[TestCase]) -> str:
-    case = cases[0]
-    return "\n".join(
-        [
-            f"只重新生成这个功能点：{group_key}",
-            f"模块：{case.module}",
-            f"功能点：{case.feature}",
-            "已有用例摘要：",
-            *[f"- {item.title}" for item in cases[:10]],
-            "要求：保留同一功能点语义，重新生成更完整、更可执行的测试用例。",
-        ]
-    )
-
-
-def _renumber_cases(cases: list[TestCase]) -> list[TestCase]:
-    groups = _group_cases(cases)
-    renumbered: list[TestCase] = []
-    for group_index, group in enumerate(groups.values(), start=1):
-        for case_index, case in enumerate(group, start=1):
-            case.case_id = f"TC-{group_index:02d}-{case_index:02d}"
-            renumbered.append(case)
-    return renumbered
 
 
 def _set_generation_result(result: GenerationResult, export_filename: str) -> None:
