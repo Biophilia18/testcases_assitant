@@ -7,6 +7,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from src.models import COLUMN_TO_FIELD, EXCEL_COLUMNS, TestCase
+from src.quality_checker import build_quality_report_rows
 from src.text_utils import normalize_steps
 
 
@@ -21,6 +22,7 @@ def build_excel(cases: list[TestCase]) -> bytes:
         sheet.append([_cell_value(case, column) for column in EXCEL_COLUMNS])
 
     _style_sheet(sheet)
+    _build_quality_sheet(workbook, cases)
 
     output = BytesIO()
     workbook.save(output)
@@ -97,3 +99,24 @@ def _estimate_row_height(row) -> int:
         value = str(cell.value or "")
         max_lines = max(max_lines, value.count("\n") + 1)
     return min(max(36, max_lines * 22), 120)
+
+
+def _build_quality_sheet(workbook: Workbook, cases: list[TestCase]) -> None:
+    sheet = workbook.create_sheet("质量报告")
+    for row in build_quality_report_rows(cases):
+        sheet.append(row)
+
+    header_fill = PatternFill("solid", fgColor="70AD47")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    for cell in sheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for column_index in range(1, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 22 if column_index < 3 else 50
+
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")

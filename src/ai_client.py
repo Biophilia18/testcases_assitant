@@ -7,32 +7,9 @@ from typing import Any
 
 from src.env_loader import load_env_file
 from src.models import GenerationResult, TestCase
+from src.prompt_manager import load_prompt
 from src.rule_based_generator import extract_requirement_items, generate_rule_based_cases
 from src.text_utils import normalize_steps
-
-
-BASE_SYSTEM_PROMPT = """你是资深软件测试工程师。请根据需求文本生成结构化测试用例。
-
-要求：
-1. 先识别完整业务流程，把登录、查询、提交、审核、导出、支付、退款等业务节点拆成独立功能点，不要把整段流程当成一个功能。
-2. 每个功能点至少生成正常流程、异常输入、边界值、权限、重复操作或状态流转相关用例。
-3. 用例要覆盖输入校验、状态变化、数据一致性、权限控制和关键异常路径。
-4. 只返回 JSON 数组，不要返回 Markdown、解释文字或代码块。
-
-每个对象必须包含这些字段：
-case_id, module, feature, title, precondition, test_data, steps, expected_result, priority, case_type, remark。
-
-priority 只能使用 P0、P1、P2、P3。
-case_id 使用 TC-01-01 这类稳定编号。
-"""
-
-
-GENERATION_TYPE_PROMPTS = {
-    "功能测试": "当前生成类型是功能测试。重点覆盖业务规则、状态流转、输入校验、权限控制和数据一致性。",
-    "接口测试": "当前生成类型是接口测试。重点覆盖请求参数、鉴权、状态码、响应字段、错误码、幂等和数据落库。",
-    "Web UI 测试": "当前生成类型是 Web UI 测试。重点覆盖页面入口、表单校验、按钮状态、跳转、刷新、重复点击和前端展示。",
-    "App 测试": "当前生成类型是 App 测试。重点覆盖移动端页面、弱网/断网、返回/取消、重复点击、登录态失效和多设备兼容。",
-}
 
 
 @dataclass(frozen=True)
@@ -207,8 +184,7 @@ def _call_chat_completion(
 
 
 def _build_system_prompt(generation_type: str) -> str:
-    extra_prompt = GENERATION_TYPE_PROMPTS.get(generation_type, GENERATION_TYPE_PROMPTS["功能测试"])
-    return f"{BASE_SYSTEM_PROMPT}\n{extra_prompt}"
+    return load_prompt(generation_type)
 
 
 def _get_provider_config(provider: str) -> ProviderConfig:

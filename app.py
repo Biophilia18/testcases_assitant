@@ -6,6 +6,7 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.exporter import build_excel
 from src.filename_utils import build_export_filename
 from src.models import GenerationResult, TestCase
+from src.persistence import load_generation_result_from_text, load_latest_generation_result, save_generation_result
 from src.quality_checker import check_cases
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
@@ -19,11 +20,8 @@ def main() -> None:
     with st.sidebar:
         mode = st.radio("生成方式", ["规则生成", "AI 生成"], index=0)
         provider = st.radio("AI 服务商", ["DeepSeek", "OpenAI"], index=0)
-        generation_type = st.selectbox(
-            "用例生成类型",
-            ["功能测试", "接口测试", "Web UI 测试", "App 测试"],
-            index=0,
-        )
+        generation_type = "功能测试"
+        st.selectbox("用例生成类型", ["功能测试"], index=0, help="当前阶段先完整打磨功能测试。")
         cases_per_feature = st.slider("每个功能点生成用例数", min_value=3, max_value=8, value=6)
 
         if is_provider_configured(provider):
@@ -32,6 +30,33 @@ def main() -> None:
             env_name = "DEEPSEEK_API_KEY" if provider == "DeepSeek" else "OPENAI_API_KEY"
             st.info(f"未检测到 {env_name}，AI 生成会自动回退到规则生成。")
 
+    input_tab, result_tab, quality_tab, export_tab = st.tabs(["需求输入", "生成结果", "质量检查", "导出"])
+
+    with input_tab:
+        _render_input_tab(mode, provider, generation_type, cases_per_feature)
+
+    result: GenerationResult | None = st.session_state.get("generation_result")
+    if not result or not result.cases:
+        with result_tab:
+            st.info("暂无测试用例。请先生成或导入历史 JSON。")
+        return
+
+    with result_tab:
+        _render_generation_status(result)
+        _render_grouped_summary(result.cases)
+        _render_regenerate_panel(result)
+        _render_edit_table(result)
+
+    edited_cases = st.session_state.get("edited_cases", result.cases)
+
+    with quality_tab:
+        _render_quality_tab(edited_cases)
+
+    with export_tab:
+        _render_export_tab(edited_cases)
+
+
+def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_feature: int) -> None:
     st.subheader("需求模板")
     project_name = st.text_input("项目/系统名称", placeholder="例如：电商后台、会员 App、订单管理系统")
 
@@ -63,6 +88,31 @@ def main() -> None:
     )
 
     generate_clicked = st.button("生成测试用例", type="primary")
+    load_col1, load_col2 = st.columns(2)
+    with load_col1:
+        if st.button("加载最近一次 JSON"):
+            try:
+                result, filename = load_latest_generation_result()
+                st.session_state["generation_result"] = result
+                st.session_state["export_filename"] = filename
+                st.success("已加载最近一次生成结果。")
+                st.rerun()
+            except FileNotFoundError:
+                st.warning("还没有找到 outputs/latest_cases.json。")
+            except Exception as exc:
+                st.error(f"加载失败：{exc}")
+
+    with load_col2:
+        uploaded_file = st.file_uploader("导入历史 JSON", type=["json"])
+        if uploaded_file is not None:
+            try:
+                result, filename = load_generation_result_from_text(uploaded_file.read().decode("utf-8"))
+                st.session_state["generation_result"] = result
+                st.session_state["export_filename"] = filename
+                st.success("已导入历史 JSON。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"导入失败：{exc}")
 
     if generate_clicked:
         requirement_text = _build_requirement_text(
@@ -100,16 +150,14 @@ def main() -> None:
                 "generation_type": generation_type,
                 "cases_per_feature": cases_per_feature,
             }
+            save_generation_result(
+                st.session_state["generation_result"],
+                st.session_state["export_filename"],
+            )
+            st.success("生成结果已保存到 outputs/latest_cases.json。")
 
-    result: GenerationResult | None = st.session_state.get("generation_result")
-    if not result or not result.cases:
-        return
 
-    _render_generation_status(result)
-
-    _render_grouped_summary(result.cases)
-    _render_regenerate_panel(result)
-
+def _render_edit_table(result: GenerationResult) -> None:
     st.subheader("全部用例编辑")
     st.caption("可直接修改单元格内容。导出 Excel 时会使用编辑后的表格。")
 
@@ -121,20 +169,13 @@ def main() -> None:
         key="editable_cases",
     )
     edited_cases = rows_to_cases(edited_rows)
+    st.session_state["edited_cases"] = edited_cases
     warnings = find_case_warnings(edited_cases)
 
     if warnings:
         with st.expander(f"编辑检查：发现 {len(warnings)} 个提示"):
             for warning in warnings:
                 st.warning(warning)
-
-    excel_bytes = build_excel(edited_cases)
-    st.download_button(
-        f"导出 Excel（{len(edited_cases)} 条）",
-        data=excel_bytes,
-        file_name=st.session_state.get("export_filename", "测试用例.xlsx"),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
 
 
 def _build_requirement_text(
@@ -176,6 +217,56 @@ def _render_generation_status(result: GenerationResult) -> None:
             st.code(result.fallback_reason)
     else:
         st.info(result.message)
+
+
+def _render_quality_tab(cases: list[TestCase]) -> None:
+    st.subheader("生成质量报告")
+    issues = check_cases(cases)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("总用例数", len(cases))
+    col2.metric("功能点数", len(_group_cases(cases)))
+    col3.metric("质量提示", len(issues))
+    col4.metric("P1/P0", sum(1 for case in cases if case.priority in {"P0", "P1"}))
+
+    if not issues:
+        st.success("暂无明显质量提示。")
+        return
+
+    for issue in issues:
+        if issue.severity == "错误":
+            st.error(f"{issue.case_id}：{issue.message}")
+        else:
+            st.warning(f"{issue.case_id}：{issue.message}")
+
+
+def _render_export_tab(cases: list[TestCase]) -> None:
+    st.subheader("导出")
+    filename = st.session_state.get("export_filename", "测试用例.xlsx")
+    st.text_input("导出文件名", value=filename, key="export_filename")
+
+    result: GenerationResult | None = st.session_state.get("generation_result")
+    if result and st.button("保存当前编辑结果为 JSON"):
+        snapshot = GenerationResult(
+            cases=cases,
+            requested_mode=result.requested_mode,
+            actual_mode=result.actual_mode,
+            feature_count=len(_group_cases(cases)),
+            case_count=len(cases),
+            provider=result.provider,
+            model=result.model,
+            message=result.message,
+            fallback_reason=result.fallback_reason,
+        )
+        save_generation_result(snapshot, st.session_state.get("export_filename", filename))
+        st.success("已保存到 outputs/latest_cases.json，并生成历史快照。")
+
+    excel_bytes = build_excel(cases)
+    st.download_button(
+        f"导出 Excel（{len(cases)} 条，含质量报告）",
+        data=excel_bytes,
+        file_name=st.session_state.get("export_filename", filename),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def _render_grouped_summary(cases: list[TestCase]) -> None:

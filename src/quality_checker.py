@@ -34,6 +34,32 @@ def issue_messages(cases: list[TestCase]) -> list[str]:
     return [f"[{issue.severity}] {issue.case_id} {issue.message}" for issue in check_cases(cases)]
 
 
+def build_quality_report_rows(cases: list[TestCase]) -> list[list[str | int]]:
+    issues = check_cases(cases)
+    priority_counts = Counter(case.priority or "未设置" for case in cases)
+    type_counts = Counter(case.case_type or "未设置" for case in cases)
+    feature_count = len({f"{case.module}:{case.feature}" for case in cases})
+
+    rows: list[list[str | int]] = [
+        ["指标", "值"],
+        ["总用例数", len(cases)],
+        ["功能点数量", feature_count],
+        ["质量提示数", len(issues)],
+        ["P0 用例数", priority_counts.get("P0", 0)],
+        ["P1 用例数", priority_counts.get("P1", 0)],
+        ["P2 用例数", priority_counts.get("P2", 0)],
+        ["P3 用例数", priority_counts.get("P3", 0)],
+        ["", ""],
+        ["用例类型", "数量"],
+    ]
+
+    rows.extend([[case_type, count] for case_type, count in sorted(type_counts.items())])
+    rows.extend([["", ""], ["严重程度", "用例编号", "问题"]])
+    rows.extend([[issue.severity, issue.case_id, issue.message] for issue in issues])
+
+    return rows
+
+
 def _check_required_fields(case: TestCase) -> list[QualityIssue]:
     checks = [
         (case.case_id, "缺少用例编号。"),
