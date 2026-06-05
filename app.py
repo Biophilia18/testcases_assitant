@@ -54,6 +54,7 @@ def main() -> None:
         selected_coverage_types = normalize_coverage_types(coverage_types)
         if not coverage_types:
             st.warning("未选择覆盖类型时会使用默认覆盖类型。")
+        st.caption(f"当前每个功能点预计生成 {len(selected_coverage_types)} 条用例。")
 
         if is_provider_configured(provider):
             st.success(f"已检测到 {provider} API Key。")
@@ -64,7 +65,9 @@ def main() -> None:
         _render_history_loader()
 
     _render_step_input(mode, provider, generation_type, selected_coverage_types)
+    st.divider()
     _render_step_preview()
+    st.divider()
 
     result: GenerationResult | None = st.session_state.get("generation_result")
     if not result or not result.cases:
@@ -84,10 +87,10 @@ def main() -> None:
     edited_cases = st.session_state.get("edited_cases", result.cases)
 
     st.subheader("Step 4：编辑与质量检查")
-    _render_regenerate_panel(result)
     _render_edit_table(result)
     edited_cases = st.session_state.get("edited_cases", result.cases)
     _render_quality_tab(edited_cases, result.coverage_types)
+    _render_regenerate_panel(result)
 
     st.subheader("Step 5：保存与导出")
     _render_export_tab(edited_cases, result.coverage_types)
@@ -218,11 +221,12 @@ def _render_history_loader() -> None:
 
 
 def _render_step_preview() -> None:
-    st.subheader("Step 2：生成计划预览")
+    st.subheader("Step 2：生成计划预览与确认")
     pending_generation = st.session_state.get("pending_generation")
     if not pending_generation:
         st.info("填写需求后点击“生成计划预览”，这里会展示识别到的功能点。")
         return
+    st.info("请检查识别到的功能点，取消不需要生成的项，再点击确认生成。")
 
     preview = build_generation_preview(
         pending_generation["requirement_text"],
@@ -413,8 +417,9 @@ def _render_quality_snapshot(cases: list[TestCase], coverage_types: list[str] | 
     col2.metric("覆盖项", f"{covered_count}/{len(matrix)}")
     col3.metric("内容扣分", sum(item.points for item in score.deductions))
     st.caption(score.summary)
+    st.caption("评分和覆盖提示仅用于辅助检查，最终仍需测试人员结合业务规则复核。")
 
-    with st.expander("查看覆盖矩阵", expanded=False):
+    with st.expander("查看覆盖提示矩阵", expanded=False):
         st.dataframe(coverage_matrix_to_rows(matrix), use_container_width=True, hide_index=True)
 
 
@@ -433,8 +438,9 @@ def _render_quality_tab(cases: list[TestCase], coverage_types: list[str] | None 
     col5.metric("覆盖项", f"{sum(1 for item in matrix if item.covered)}/{len(matrix)}")
     col6.metric("P1/P0", sum(1 for case in cases if case.priority in {"P0", "P1"}))
     st.info(score.summary)
+    st.caption("评分和覆盖提示仅用于辅助检查，最终仍需测试人员结合业务规则复核。")
 
-    with st.expander("覆盖矩阵", expanded=False):
+    with st.expander("覆盖提示矩阵", expanded=False):
         st.dataframe(coverage_matrix_to_rows(matrix), use_container_width=True, hide_index=True)
 
     with st.expander("评分明细", expanded=False):
