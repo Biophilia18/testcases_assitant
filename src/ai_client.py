@@ -46,21 +46,24 @@ def generate_cases(
     cases_per_feature: int = 6,
     provider: str = "OpenAI",
     generation_type: str = "功能测试",
+    feature_source_text: str = "",
 ) -> GenerationResult:
     load_env_file()
     requested_mode = mode
+    source_text = feature_source_text.strip() or requirement_text
 
     if mode == "AI 生成":
         return _generate_with_ai_or_fallback(
             requirement_text=requirement_text,
+            feature_source_text=source_text,
             requested_mode=requested_mode,
             cases_per_feature=cases_per_feature,
             provider=provider,
             generation_type=generation_type,
         )
 
-    cases = generate_rule_based_cases(requirement_text, cases_per_feature, generation_type)
-    feature_count = len(extract_requirement_items(requirement_text))
+    cases = generate_rule_based_cases(source_text, cases_per_feature, generation_type)
+    feature_count = len(extract_requirement_items(source_text))
     return GenerationResult(
         cases=cases,
         requested_mode=requested_mode,
@@ -88,6 +91,7 @@ def is_deepseek_configured() -> bool:
 
 def _generate_with_ai_or_fallback(
     requirement_text: str,
+    feature_source_text: str,
     requested_mode: str,
     cases_per_feature: int,
     provider: str,
@@ -95,10 +99,10 @@ def _generate_with_ai_or_fallback(
 ) -> GenerationResult:
     config = _get_provider_config(provider)
     api_key = os.getenv(config.api_key_env)
-    local_feature_count = len(extract_requirement_items(requirement_text))
+    local_feature_count = len(extract_requirement_items(feature_source_text))
 
     if not api_key:
-        cases = generate_rule_based_cases(requirement_text, cases_per_feature, generation_type)
+        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type)
         return GenerationResult(
             cases=cases,
             requested_mode=requested_mode,
@@ -115,7 +119,11 @@ def _generate_with_ai_or_fallback(
     user_prompt = (
         f"请基于以下需求生成不少于 {target_count} 条测试用例。"
         f"用例生成类型：{generation_type}。"
-        f"如需求包含多个业务节点，请先拆分节点再分别生成。\n\n需求：\n{requirement_text}"
+        f"功能点拆分请以“业务流程/需求描述”为主。"
+        f"验收标准和补充规则用于补充覆盖点，不要逐条当作独立功能点。"
+        f"如业务流程包含多个业务节点，请先拆分节点再分别生成。"
+        f"\n\n业务流程/需求描述：\n{feature_source_text}"
+        f"\n\n完整需求上下文：\n{requirement_text}"
     )
 
     try:
@@ -139,7 +147,7 @@ def _generate_with_ai_or_fallback(
             message=f"AI 生成完成：供应商 {config.name}，模型 {model}，返回 {len(cases)} 条测试用例，覆盖 {feature_count} 个功能点。",
         )
     except Exception as exc:
-        cases = generate_rule_based_cases(requirement_text, cases_per_feature, generation_type)
+        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type)
         reason = f"{type(exc).__name__}: {exc}"
         return GenerationResult(
             cases=cases,

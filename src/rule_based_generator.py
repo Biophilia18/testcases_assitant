@@ -28,6 +28,7 @@ ACTION_MODULES = {
     "下载": "文件下载",
     "支付": "支付",
     "退款": "退款",
+    "控制": "设备控制",
     "下单": "订单",
     "发货": "发货",
     "收货": "收货",
@@ -258,4 +259,4 @@ def _guess_feature(block: str) -> str:
     compact = re.sub(r"^(支持|需要|可以|能够|发起|进行|继续|再次)", "", compact)
     compact = re.sub(r"^(在|进入|对|进行)", "", compact)
     compact = compact.strip("，,。；;后")
-    return compact[:24] if len(compact) > 24 else compact
+    return compact

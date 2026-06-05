@@ -22,3 +22,11 @@ def test_extract_requirement_items_supports_numbered_list():
     assert len(items) == 3
     assert items[0].module == "账号登录"
 
+
+def test_extract_requirement_items_keeps_long_feature_text():
+    text = "用户点击控制按钮后，App 向服务端发送控制指令，服务端返回处理结果"
+
+    items = extract_requirement_items(text)
+
+    assert items[0].module == "设备控制"
+    assert "服务端返回处理结果" in items[0].feature

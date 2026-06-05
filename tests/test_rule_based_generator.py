@@ -16,3 +16,12 @@ def test_rule_based_generator_uses_generation_type():
     assert cases[0].case_type == "接口测试"
     assert "接口" in cases[0].title
 
+
+def test_rule_based_generator_title_keeps_full_feature_text():
+    cases = generate_rule_based_cases(
+        "用户点击控制按钮后，App 向服务端发送控制指令，服务端返回处理结果",
+        cases_per_feature=3,
+        generation_type="功能测试",
+    )
+
+    assert "服务端返回处理结果" in cases[0].title

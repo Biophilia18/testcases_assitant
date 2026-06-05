@@ -6,6 +6,7 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.document_loader import load_requirement_document
 from src.exporter import build_excel
 from src.filename_utils import build_export_filename
+from src.generation_preview import GenerationPreview, build_generation_preview
 from src.models import GenerationResult, TestCase
 from src.persistence import (
     list_history_files,
@@ -119,7 +120,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
         placeholder="例如：重复提交不得产生多条退款单；弱网下不能重复扣款；无权限用户不能审核。",
     )
 
-    generate_clicked = st.button("生成测试用例", type="primary")
+    preview_clicked = st.button("预览生成计划", type="primary")
     load_col1, load_col2 = st.columns(2)
     with load_col1:
         if st.button("加载最近一次 JSON"):
@@ -158,7 +159,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
             except Exception as exc:
                 st.error(f"加载失败：{exc}")
 
-    if generate_clicked:
+    if preview_clicked:
         requirement_text = _build_requirement_text(
             project_name=project_name,
             business_module=business_module,
@@ -174,32 +175,34 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
             st.warning("请至少输入业务流程/需求描述。")
             return
 
-        with st.spinner("正在生成测试用例..."):
-            result = generate_cases(
-                requirement_text=requirement_text,
-                mode=mode,
-                cases_per_feature=cases_per_feature,
-                provider=provider,
-                generation_type=generation_type,
-            )
-            export_filename = build_export_filename(
-                project_name=project_name,
-                business_module=business_module,
-                generation_type=generation_type,
-            )
-            _set_generation_result(result, export_filename)
-            st.session_state["last_requirement_text"] = requirement_text
-            st.session_state["last_generation_config"] = {
-                "mode": mode,
-                "provider": provider,
-                "generation_type": generation_type,
-                "cases_per_feature": cases_per_feature,
-            }
-            save_generation_result(
-                result,
-                export_filename,
-            )
-            st.success("生成结果已保存到 outputs/latest_cases.json。")
+        st.session_state["pending_generation"] = {
+            "requirement_text": requirement_text,
+            "feature_source_text": business_flow,
+            "project_name": project_name,
+            "business_module": business_module,
+            "mode": mode,
+            "provider": provider,
+            "generation_type": generation_type,
+            "cases_per_feature": cases_per_feature,
+        }
+
+    pending_generation = st.session_state.get("pending_generation")
+    if pending_generation:
+        preview = build_generation_preview(
+            pending_generation["requirement_text"],
+            pending_generation["cases_per_feature"],
+            feature_source_text=pending_generation.get("feature_source_text", ""),
+        )
+        _render_generation_preview(preview)
+
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("确认生成", type="primary"):
+                _run_confirmed_generation(pending_generation)
+        with cancel_col:
+            if st.button("取消预览"):
+                st.session_state.pop("pending_generation", None)
+                st.rerun()
 
 
 def _apply_uploaded_requirement(uploaded_file) -> None:
@@ -235,6 +238,51 @@ def _apply_uploaded_requirement(uploaded_file) -> None:
         st.success(f"已识别并填充 {len(filled_fields)} 个字段，可继续手动调整。")
     else:
         st.warning("未识别到有效内容，请检查文件内容。")
+
+
+def _render_generation_preview(preview: GenerationPreview) -> None:
+    st.subheader("生成前预览")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("识别功能点", len(preview.feature_items))
+    col2.metric("每功能点用例数", preview.cases_per_feature)
+    col3.metric("预计用例数", preview.estimated_case_count)
+
+    for warning in preview.warnings:
+        st.warning(warning)
+
+    with st.expander("查看识别到的功能点", expanded=bool(preview.warnings)):
+        for index, item in enumerate(preview.feature_items, start=1):
+            st.write(f"{index}. {item.module} / {item.feature}")
+            st.caption(item.description[:160])
+
+
+def _run_confirmed_generation(pending_generation: dict) -> None:
+    with st.spinner("正在生成测试用例..."):
+        result = generate_cases(
+            requirement_text=pending_generation["requirement_text"],
+            mode=pending_generation["mode"],
+            cases_per_feature=pending_generation["cases_per_feature"],
+            provider=pending_generation["provider"],
+            generation_type=pending_generation["generation_type"],
+            feature_source_text=pending_generation.get("feature_source_text", ""),
+        )
+        export_filename = build_export_filename(
+            project_name=pending_generation["project_name"],
+            business_module=pending_generation["business_module"],
+            generation_type=pending_generation["generation_type"],
+        )
+        _set_generation_result(result, export_filename)
+        st.session_state["last_requirement_text"] = pending_generation["requirement_text"]
+        st.session_state["last_generation_config"] = {
+            "mode": pending_generation["mode"],
+            "provider": pending_generation["provider"],
+            "generation_type": pending_generation["generation_type"],
+            "cases_per_feature": pending_generation["cases_per_feature"],
+        }
+        save_generation_result(result, export_filename)
+        st.session_state.pop("pending_generation", None)
+        st.success("生成结果已保存到 outputs/latest_cases.json。")
+        st.rerun()
 
 
 def _render_edit_table(result: GenerationResult) -> None:
@@ -383,8 +431,9 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
                 mode=config.get("mode", "规则生成"),
                 cases_per_feature=config.get("cases_per_feature", 6),
                 provider=config.get("provider", "DeepSeek"),
-                generation_type=config.get("generation_type", "功能测试"),
-            )
+            generation_type=config.get("generation_type", "功能测试"),
+            feature_source_text=requirement_text,
+        )
 
         kept_cases = [case for case in result.cases if _group_key(case) != selected_group]
         merged_cases = _renumber_cases(kept_cases + regenerated.cases)
