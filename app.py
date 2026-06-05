@@ -5,6 +5,10 @@ from collections import Counter
 import streamlit as st
 
 from src.ai_client import generate_cases, is_provider_configured
+from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
+from src.api_exporter import build_api_excel
+from src.api_models import ApiDocument, ApiTestCase
+from src.api_table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
 from src.coverage_config import COVERAGE_TYPE_OPTIONS, DEFAULT_COVERAGE_TYPES, normalize_coverage_types
 from src.document_loader import load_requirement_document
@@ -41,28 +45,35 @@ def main() -> None:
     st.title("AI 辅助测试用例生成与导出工具")
 
     with st.sidebar:
-        mode = st.radio("生成方式", ["规则生成", "AI 生成"], index=0)
-        provider = st.radio("AI 服务商", ["DeepSeek", "OpenAI"], index=0)
-        generation_type = "功能测试"
-        st.selectbox("用例生成类型", ["功能测试"], index=0, help="当前阶段先完整打磨功能测试。")
-        coverage_types = st.multiselect(
-            "覆盖类型",
-            COVERAGE_TYPE_OPTIONS,
-            default=DEFAULT_COVERAGE_TYPES,
-            help="当前按所选覆盖类型为每个功能点生成用例。建议先保留默认项，弱网/状态流转/兼容性按需求补充。",
-        )
-        selected_coverage_types = normalize_coverage_types(coverage_types)
-        if not coverage_types:
-            st.warning("未选择覆盖类型时会使用默认覆盖类型。")
-        st.caption(f"当前每个功能点预计生成 {len(selected_coverage_types)} 条用例。")
-
-        if is_provider_configured(provider):
-            st.success(f"已检测到 {provider} API Key。")
+        generation_type = st.selectbox("用例生成类型", ["功能测试", "接口测试"], index=0)
+        if generation_type == "接口测试":
+            st.caption("接口测试当前为文档解析 MVP：支持文档解析、手动修正、样例编辑和 Excel 导出。")
         else:
-            env_name = "DEEPSEEK_API_KEY" if provider == "DeepSeek" else "OPENAI_API_KEY"
-            st.info(f"未检测到 {env_name}，AI 生成会自动回退到规则生成。")
+            mode = st.radio("生成方式", ["规则生成", "AI 生成"], index=0)
+            provider = st.radio("AI 服务商", ["DeepSeek", "OpenAI"], index=0)
+            st.caption("当前重点支持功能测试。接口/Web UI/App 测试为后续方向或预留模板。")
+            coverage_types = st.multiselect(
+                "覆盖类型",
+                COVERAGE_TYPE_OPTIONS,
+                default=DEFAULT_COVERAGE_TYPES,
+                help="当前按所选覆盖类型为每个功能点生成用例。建议先保留默认项，弱网/状态流转/兼容性按需求补充。",
+            )
+            selected_coverage_types = normalize_coverage_types(coverage_types)
+            if not coverage_types:
+                st.warning("未选择覆盖类型时会使用默认覆盖类型。")
+            st.caption(f"当前每个功能点预计生成 {len(selected_coverage_types)} 条用例。")
 
-        _render_history_loader()
+            if is_provider_configured(provider):
+                st.success(f"已检测到 {provider} API Key。")
+            else:
+                env_name = "DEEPSEEK_API_KEY" if provider == "DeepSeek" else "OPENAI_API_KEY"
+                st.info(f"未检测到 {env_name}，AI 生成会自动回退到规则生成。")
+
+            _render_history_loader()
+
+    if generation_type == "接口测试":
+        _render_api_test_page()
+        return
 
     _render_step_input(mode, provider, generation_type, selected_coverage_types)
     st.divider()
@@ -218,6 +229,247 @@ def _render_history_loader() -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(f"加载失败：{exc}")
+
+
+def _render_api_test_page() -> None:
+    st.title("接口测试用例编辑与导出")
+    st.caption("当前接口测试模式为文档解析 MVP：支持接口文档识别、手动修正、样例用例编辑和 Excel 导出，暂不接 AI。")
+
+    st.subheader("接口文档输入")
+    api_document_text = st.text_area(
+        "粘贴接口文档",
+        key="api_document_text",
+        height=260,
+        placeholder=(
+            "示例：\n"
+            "项目/系统名称：智控家监测系统\n"
+            "业务模块：设备控制\n"
+            "接口名称：设备控制接口\n"
+            "请求方法：POST\n"
+            "接口路径：/api/devices/{deviceId}/control\n"
+            "鉴权方式：Bearer Token\n"
+            "请求参数：deviceId 设备ID，必填\n"
+            "请求体：{\"action\":\"open\"}\n"
+            "业务规则：设备在线且用户有权限才允许控制\n"
+            "数据库校验：设备状态记录更新"
+        ),
+    )
+    if st.button("解析接口文档"):
+        if not api_document_text.strip():
+            st.warning("请先粘贴接口文档内容。")
+        else:
+            parsed_document = parse_api_document(api_document_text)
+            _apply_api_document_to_state(parsed_document)
+            st.session_state["api_document_parsed"] = True
+            st.success("已解析接口文档，请检查并手动修正识别结果。")
+
+    st.subheader("解析结果预览与修正")
+    if not st.session_state.get("api_document_parsed"):
+        st.info("可以直接手动填写，也可以先粘贴接口文档并点击“解析接口文档”。")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        project_name = st.text_input("项目/系统名称", key="api_project_name", placeholder="例如：智控家监测系统")
+        module = st.text_input("业务模块", key="api_module", placeholder="例如：设备控制")
+        api_name = st.text_input("接口名称", key="api_name", placeholder="例如：设备控制接口")
+    with col2:
+        method = st.selectbox("请求方法", ["GET", "POST", "PUT", "PATCH", "DELETE"], index=1, key="api_method")
+        path = st.text_input("接口路径", key="api_path", placeholder="例如：/api/devices/{deviceId}/control")
+        auth = st.text_input("鉴权方式", key="api_auth", placeholder="例如：Bearer Token / Session / 无")
+
+    detail_col1, detail_col2 = st.columns(2)
+    with detail_col1:
+        headers = st.text_area("请求头", key="api_headers", height=90, placeholder="例如：Authorization、Content-Type")
+        params = st.text_area("请求参数 / 字段说明", key="api_params", height=120, placeholder="例如：deviceId 设备ID，必填")
+        body = st.text_area("请求体", key="api_body", height=140, placeholder='例如：{"action": "open"}')
+    with detail_col2:
+        response_example = st.text_area("响应示例", key="api_response_example", height=140, placeholder="可填写成功响应和失败响应")
+        business_rules = st.text_area("业务规则", key="api_business_rules", height=120, placeholder="例如：设备在线且用户有权限才允许控制")
+        db_checks = st.text_area("数据库校验", key="api_db_checks", height=90, placeholder="例如：设备状态记录更新")
+
+    document = fields_to_api_document(
+        {
+            "project_name": project_name,
+            "module": module,
+            "api_name": api_name,
+            "method": method,
+            "path": path,
+            "auth": auth,
+            "headers": headers,
+            "params": params,
+            "body": body,
+            "response_example": response_example,
+            "business_rules": business_rules,
+            "db_checks": db_checks,
+        }
+    )
+
+    with st.expander("查看当前接口文档结构化结果", expanded=False):
+        st.dataframe(_api_document_preview_rows(document), use_container_width=True, hide_index=True)
+
+    if st.button("生成接口测试样例", type="primary"):
+        st.session_state["api_cases"] = _build_sample_api_cases(document)
+        st.session_state["api_export_filename"] = _build_api_export_filename(project_name, module)
+
+    api_cases: list[ApiTestCase] = st.session_state.get("api_cases") or _build_sample_api_cases(document)
+    st.subheader("接口测试用例编辑")
+    edited_rows = st.data_editor(
+        api_cases_to_rows(api_cases),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="api_case_editor",
+    )
+    edited_cases = rows_to_api_cases(edited_rows)
+    st.session_state["api_cases"] = edited_cases
+
+    warnings = find_api_case_warnings(edited_cases)
+    if warnings:
+        with st.expander(f"接口用例检查：发现 {len(warnings)} 个提示", expanded=False):
+            for warning in warnings:
+                st.warning(warning)
+
+    st.subheader("导出接口 Excel")
+    filename = st.text_input(
+        "接口 Excel 文件名",
+        value=st.session_state.get("api_export_filename", _build_api_export_filename(project_name, module)),
+        key="api_export_filename",
+    )
+    st.download_button(
+        f"导出接口 Excel（{len(edited_cases)} 条）",
+        data=build_api_excel(edited_cases),
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _apply_api_document_to_state(document: ApiDocument) -> None:
+    field_to_key = {
+        "project_name": "api_project_name",
+        "module": "api_module",
+        "api_name": "api_name",
+        "method": "api_method",
+        "path": "api_path",
+        "auth": "api_auth",
+        "headers": "api_headers",
+        "params": "api_params",
+        "body": "api_body",
+        "response_example": "api_response_example",
+        "business_rules": "api_business_rules",
+        "db_checks": "api_db_checks",
+    }
+    fields = api_document_to_fields(document)
+    for field, key in field_to_key.items():
+        value = fields.get(field, "")
+        if field == "method" and value not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            value = "POST"
+        st.session_state[key] = value
+
+
+def _api_document_preview_rows(document: ApiDocument) -> list[dict[str, str]]:
+    return [
+        {"字段": "项目/系统名称", "识别内容": document.project_name},
+        {"字段": "业务模块", "识别内容": document.module},
+        {"字段": "接口名称", "识别内容": document.api_name},
+        {"字段": "请求方法", "识别内容": document.method},
+        {"字段": "接口路径", "识别内容": document.path},
+        {"字段": "鉴权方式", "识别内容": document.auth},
+        {"字段": "请求头", "识别内容": document.headers},
+        {"字段": "请求参数 / 字段说明", "识别内容": document.params},
+        {"字段": "请求体", "识别内容": document.body},
+        {"字段": "响应示例", "识别内容": document.response_example},
+        {"字段": "业务规则", "识别内容": document.business_rules},
+        {"字段": "数据库校验", "识别内容": document.db_checks},
+    ]
+
+
+def _build_sample_api_cases(document: ApiDocument) -> list[ApiTestCase]:
+    module = document.module.strip() or "接口模块"
+    api_name = document.api_name.strip() or "示例接口"
+    method = document.method.strip() or "POST"
+    path = document.path.strip() or "/api/example"
+    query_params = document.params.strip() or "deviceId=10001"
+    request_body = document.body.strip() or '{"action": "open"}'
+    auth_summary = document.auth.strip() or "有效鉴权信息"
+    headers_summary = document.headers.strip()
+    business_rules = document.business_rules.strip() or "按接口文档业务规则校验。"
+    db_checks = document.db_checks.strip() or "按接口文档检查相关业务数据。"
+    response_example = document.response_example.strip()
+    precondition = f"准备{auth_summary}，接口服务可访问。"
+    if headers_summary:
+        precondition = f"{precondition}\n请求头：{headers_summary}"
+    success_expected = "接口返回成功；响应字段、业务状态和数据记录符合预期。"
+    if response_example:
+        success_expected = f"接口返回成功，响应内容符合接口文档示例。\n参考响应：{response_example}"
+
+    return [
+        ApiTestCase(
+            case_id="API-01-01",
+            module=module,
+            api_name=api_name,
+            method=method,
+            path=path,
+            query_params=query_params,
+            request_body=request_body,
+            precondition=precondition,
+            steps=f"1. 构造{api_name}合法请求\n2. 发送请求\n3. 查看响应和业务数据",
+            expected_status="200",
+            expected_result=success_expected,
+            priority="P1",
+            case_type="接口测试",
+            remark=f"正常请求。业务规则：{business_rules}\n数据库校验：{db_checks}",
+        ),
+        ApiTestCase(
+            case_id="API-01-02",
+            module=module,
+            api_name=api_name,
+            method=method,
+            path=path,
+            query_params=_build_invalid_api_params(query_params),
+            request_body=_build_invalid_api_body(request_body),
+            precondition=precondition,
+            steps=f"1. 构造缺少必填参数的{api_name}请求\n2. 发送请求\n3. 查看错误响应",
+            expected_status="400",
+            expected_result="接口返回明确错误码和错误信息，不产生异常业务数据。",
+            priority="P1",
+            case_type="异常测试",
+            remark="必填参数缺失或字段非法，需要结合接口字段说明补充具体数据。",
+        ),
+        ApiTestCase(
+            case_id="API-01-03",
+            module=module,
+            api_name=api_name,
+            method=method,
+            path=path,
+            query_params=query_params,
+            request_body=request_body,
+            precondition=f"准备无效或无权限的{auth_summary}。",
+            steps=f"1. 使用无效鉴权信息请求{api_name}\n2. 发送请求\n3. 查看鉴权结果",
+            expected_status="401",
+            expected_result="接口拒绝访问，不泄露敏感数据。",
+            priority="P1",
+            case_type="权限测试",
+            remark=f"鉴权失败。鉴权方式：{auth_summary}",
+        ),
+    ]
+
+
+def _build_invalid_api_params(query_params: str) -> str:
+    if not query_params.strip():
+        return "必填参数留空"
+    first_line = query_params.strip().splitlines()[0]
+    return f"{first_line}（置为空或非法值）"
+
+
+def _build_invalid_api_body(request_body: str) -> str:
+    if not request_body.strip():
+        return "必填字段留空"
+    return f"{request_body}\n说明：将必填字段置为空或非法值。"
+
+
+def _build_api_export_filename(project_name: str, module: str) -> str:
+    parts = [part.strip() for part in [project_name, module, "接口测试用例"] if part.strip()]
+    return "_".join(parts) + ".xlsx" if parts else "接口测试用例.xlsx"
 
 
 def _render_step_preview() -> None:
