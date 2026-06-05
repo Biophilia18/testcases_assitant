@@ -135,6 +135,8 @@ def _normalize_method(method: str) -> str:
 
 def _clean_list_marker(line: str) -> str:
     cleaned = line.strip()
+    if cleaned.startswith("```"):
+        return ""
     cleaned = re.sub(r"^[-*•]\s*", "", cleaned)
     cleaned = re.sub(r"^\d+[.)、]\s*", "", cleaned)
     return cleaned.strip()

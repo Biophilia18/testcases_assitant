@@ -8,6 +8,7 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
 from src.api_exporter import build_api_excel
 from src.api_models import ApiDocument, ApiTestCase
+from src.api_quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
 from src.api_rule_generator import generate_api_cases
 from src.api_table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
@@ -237,6 +238,15 @@ def _render_api_test_page() -> None:
     st.caption("当前接口测试模式为规则生成 MVP：支持接口文档识别、手动修正、规则生成、表格编辑和 Excel 导出，暂不接 AI。")
 
     st.subheader("接口文档输入")
+    api_document_file = st.file_uploader(
+        "上传接口文档（txt / md）",
+        type=["txt", "md"],
+        key="api_document_upload",
+        help="当前接口模式先支持 txt 和 md。上传后会自动解析并填充下方字段。",
+    )
+    if api_document_file is not None:
+        _apply_uploaded_api_document(api_document_file)
+
     api_document_text = st.text_area(
         "粘贴接口文档",
         key="api_document_text",
@@ -330,6 +340,8 @@ def _render_api_test_page() -> None:
             for warning in warnings:
                 st.warning(warning)
 
+    _render_api_quality_panel(edited_cases, document)
+
     st.subheader("导出接口 Excel")
     filename = st.text_input(
         "接口 Excel 文件名",
@@ -338,10 +350,49 @@ def _render_api_test_page() -> None:
     )
     st.download_button(
         f"导出接口 Excel（{len(edited_cases)} 条）",
-        data=build_api_excel(edited_cases),
+        data=build_api_excel(edited_cases, document=document),
         file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def _render_api_quality_panel(cases: list[ApiTestCase], document: ApiDocument) -> None:
+    issues = analyze_api_quality(cases, document)
+    summary = api_quality_summary(cases, issues)
+
+    st.subheader("接口质量检查")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("用例数", summary["case_count"])
+    col2.metric("覆盖类型", summary["covered_categories"])
+    col3.metric("错误", summary["error_count"])
+    col4.metric("警告", summary["warning_count"])
+    st.caption("接口质量检查用于辅助发现断言、鉴权、参数和数据库校验缺口，最终仍需结合接口文档和业务规则复核。")
+
+    if not issues:
+        st.success("接口用例暂无明显质量提示。")
+        return
+
+    with st.expander(f"查看接口质量提示（{summary['issue_count']} 项）", expanded=False):
+        st.dataframe(api_quality_issues_to_rows(issues), use_container_width=True, hide_index=True)
+
+
+def _apply_uploaded_api_document(uploaded_file) -> None:
+    upload_key = f"{uploaded_file.name}:{getattr(uploaded_file, 'size', 0)}"
+    if st.session_state.get("last_api_document_upload") == upload_key:
+        return
+
+    try:
+        raw_text = load_requirement_document(uploaded_file.name, uploaded_file.read())
+    except Exception as exc:
+        st.error(f"接口文档读取失败：{exc}")
+        return
+
+    parsed_document = parse_api_document(raw_text)
+    st.session_state["api_document_text"] = raw_text
+    _apply_api_document_to_state(parsed_document)
+    st.session_state["api_document_parsed"] = True
+    st.session_state["last_api_document_upload"] = upload_key
+    st.success("已读取并解析接口文档，请检查解析结果并手动修正。")
 
 
 def _apply_api_document_to_state(document: ApiDocument) -> None:

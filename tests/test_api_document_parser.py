@@ -1,4 +1,5 @@
 from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
+from pathlib import Path
 
 
 def test_parse_api_document_by_titles() -> None:
@@ -111,3 +112,39 @@ def test_api_document_fields_round_trip_and_normalize_method() -> None:
     assert fields["method"] == "PATCH"
     assert fields["path"] == "/api/control"
     assert fields["db_checks"] == "状态更新"
+
+
+def test_parse_api_document_skips_markdown_code_fences() -> None:
+    text = """
+请求体：
+```json
+{"name":"demo"}
+```
+成功响应：
+```json
+{"code":0}
+```
+"""
+
+    document = parse_api_document(text)
+
+    assert "```" not in document.body
+    assert "```" not in document.response_example
+    assert '{"name":"demo"}' in document.body
+    assert '{"code":0}' in document.response_example
+
+
+def test_parse_api_document_examples() -> None:
+    root = Path(__file__).resolve().parents[1]
+    markdown_document = parse_api_document((root / "examples/api_smart_home_device_control.md").read_text(encoding="utf-8"))
+    text_document = parse_api_document((root / "examples/api_housekeeping_appointment.txt").read_text(encoding="utf-8"))
+
+    assert markdown_document.project_name == "智控家监测系统"
+    assert markdown_document.method == "POST"
+    assert "/api/devices/{deviceId}/control" == markdown_document.path
+    assert "设备必须在线才允许控制" in markdown_document.business_rules
+    assert "设备状态记录更新" in markdown_document.db_checks
+    assert text_document.project_name == "爱家政服务管理系统"
+    assert text_document.api_name == "创建服务预约接口"
+    assert text_document.method == "POST"
+    assert "预约主表生成预约记录" in text_document.db_checks

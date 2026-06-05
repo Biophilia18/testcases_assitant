@@ -3,7 +3,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from src.api_exporter import build_api_excel
-from src.api_models import API_EXCEL_COLUMNS, ApiTestCase
+from src.api_models import API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
 
 
 def test_build_api_excel_contains_api_sheet_and_data():
@@ -36,3 +36,43 @@ def test_build_api_excel_contains_api_sheet_and_data():
     assert row[2] == "设备控制接口"
     assert row[3] == "POST"
     assert row[9] == "200"
+
+
+def test_build_api_excel_contains_quality_report_sheet():
+    case = ApiTestCase(
+        case_id="API-01-01",
+        module="设备控制",
+        api_name="设备控制接口",
+        method="POST",
+        path="/api/devices/{deviceId}/control",
+        query_params="deviceId=10001",
+        request_body='{"action": "open"}',
+        precondition="已获取有效 token",
+        steps="1. 构造请求\n2. 发送请求",
+        expected_status="200",
+        expected_result="成功",
+        priority="P1",
+        case_type="正常请求",
+        remark="示例",
+    )
+    document = ApiDocument(
+        project_name="智控家监测系统",
+        module="设备控制",
+        api_name="设备控制接口",
+        method="POST",
+        path="/api/devices/{deviceId}/control",
+        auth="Bearer Token",
+        response_example='{"code":0}',
+        db_checks="设备状态记录更新",
+    )
+
+    data = build_api_excel([case], document=document)
+    workbook = load_workbook(BytesIO(data))
+    sheet = workbook["接口质量报告"]
+
+    assert "接口测试用例" in workbook.sheetnames
+    assert "接口质量报告" in workbook.sheetnames
+    assert sheet["A1"].value == "接口质量概览"
+    assert sheet["A12"].value == "接口质量提示"
+    assert sheet["A13"].value == "分类"
+    assert any(row[0] == "数据库校验" for row in sheet.iter_rows(min_row=14, values_only=True))

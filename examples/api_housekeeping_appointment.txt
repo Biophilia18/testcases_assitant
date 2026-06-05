@@ -1,0 +1,67 @@
+项目/系统名称：爱家政服务管理系统
+
+业务模块：服务预约管理
+
+接口名称：创建服务预约接口
+
+请求方法：POST
+
+接口路径：/api/appointments
+
+鉴权方式：Bearer Token
+
+请求头：
+Authorization: Bearer {token}
+Content-Type: application/json
+
+请求参数：
+无
+
+请求体：
+{
+  "serviceType": "cleaning",
+  "serviceAddress": "上海市浦东新区示例路 100 号",
+  "appointmentDate": "2026-06-10",
+  "appointmentTime": "10:00",
+  "contactName": "张三",
+  "contactPhone": "13800000000",
+  "remark": "需要提前电话联系"
+}
+
+字段说明：
+serviceType：服务类型，必填
+serviceAddress：服务地址，必填
+appointmentDate：预约日期，必填，不能早于当前日期
+appointmentTime：预约时间，必填
+contactName：联系人，必填
+contactPhone：联系电话，必填，必须符合手机号格式
+remark：备注，选填
+
+成功响应：
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "appointmentNo": "YY202606100001",
+    "status": "待派单"
+  }
+}
+
+失败响应：
+{
+  "code": 400,
+  "message": "appointment time invalid"
+}
+
+业务规则：
+服务类型不能为空。
+预约时间不能早于当前时间。
+联系电话必须符合手机号格式。
+服务地址超出服务范围时不能提交预约。
+同一用户同一时间段不能重复预约相同服务。
+
+数据库校验：
+预约主表生成预约记录。
+预约状态为待派单。
+预约编号唯一。
+联系人、联系电话、服务地址与请求内容一致。
