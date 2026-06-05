@@ -78,3 +78,16 @@ def test_rule_generation_uses_business_flow_as_feature_source():
     assert result.feature_count < 10
     assert result.case_count == result.feature_count * 3
     assert all("项目/系统名称" not in case.feature for case in result.cases)
+
+
+def test_build_generation_preview_counts_selected_coverage_types():
+    preview = build_generation_preview(
+        STRUCTURED_REQUIREMENT,
+        cases_per_feature=6,
+        feature_source_text=BUSINESS_FLOW,
+        coverage_types=["正常流程", "弱网/超时"],
+    )
+
+    assert preview.coverage_types == ["正常流程", "弱网/超时"]
+    assert preview.cases_per_feature == 2
+    assert preview.estimated_case_count == len(preview.feature_items) * 2

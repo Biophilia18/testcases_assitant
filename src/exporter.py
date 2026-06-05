@@ -11,7 +11,7 @@ from src.quality_checker import build_quality_report_rows
 from src.text_utils import normalize_steps
 
 
-def build_excel(cases: list[TestCase]) -> bytes:
+def build_excel(cases: list[TestCase], coverage_types: list[str] | None = None) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "测试用例"
@@ -22,7 +22,7 @@ def build_excel(cases: list[TestCase]) -> bytes:
         sheet.append([_cell_value(case, column) for column in EXCEL_COLUMNS])
 
     _style_sheet(sheet)
-    _build_quality_sheet(workbook, cases)
+    _build_quality_sheet(workbook, cases, coverage_types)
 
     output = BytesIO()
     workbook.save(output)
@@ -101,9 +101,9 @@ def _estimate_row_height(row) -> int:
     return min(max(36, max_lines * 22), 120)
 
 
-def _build_quality_sheet(workbook: Workbook, cases: list[TestCase]) -> None:
+def _build_quality_sheet(workbook: Workbook, cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
     sheet = workbook.create_sheet("质量报告")
-    for row in build_quality_report_rows(cases):
+    for row in build_quality_report_rows(cases, coverage_types):
         sheet.append(row)
 
     header_fill = PatternFill("solid", fgColor="70AD47")

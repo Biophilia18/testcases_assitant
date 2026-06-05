@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import streamlit as st
 
 from src.ai_client import generate_cases, is_provider_configured
+from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
+from src.coverage_config import COVERAGE_TYPE_OPTIONS, DEFAULT_COVERAGE_TYPES, normalize_coverage_types
 from src.document_loader import load_requirement_document
 from src.exporter import build_excel
 from src.filename_utils import build_export_filename
@@ -15,6 +19,7 @@ from src.persistence import (
     load_latest_generation_result,
     save_generation_result,
 )
+from src.quality_score import QualityScore, calculate_quality_score
 from src.quality_checker import check_cases
 from src.requirement_parser import parse_requirement_text
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
@@ -31,7 +36,15 @@ def main() -> None:
         provider = st.radio("AI 服务商", ["DeepSeek", "OpenAI"], index=0)
         generation_type = "功能测试"
         st.selectbox("用例生成类型", ["功能测试"], index=0, help="当前阶段先完整打磨功能测试。")
-        cases_per_feature = st.slider("每个功能点生成用例数", min_value=3, max_value=8, value=6)
+        coverage_types = st.multiselect(
+            "覆盖类型",
+            COVERAGE_TYPE_OPTIONS,
+            default=DEFAULT_COVERAGE_TYPES,
+            help="当前按所选覆盖类型为每个功能点生成用例。建议先保留默认项，弱网/状态流转/兼容性按需求补充。",
+        )
+        selected_coverage_types = normalize_coverage_types(coverage_types)
+        if not coverage_types:
+            st.warning("未选择覆盖类型时会使用默认覆盖类型。")
 
         if is_provider_configured(provider):
             st.success(f"已检测到 {provider} API Key。")
@@ -42,7 +55,7 @@ def main() -> None:
     input_tab, result_tab, quality_tab, export_tab = st.tabs(["需求输入", "生成结果", "质量检查", "导出"])
 
     with input_tab:
-        _render_input_tab(mode, provider, generation_type, cases_per_feature)
+        _render_input_tab(mode, provider, generation_type, selected_coverage_types)
 
     result: GenerationResult | None = st.session_state.get("generation_result")
     if not result or not result.cases:
@@ -52,20 +65,21 @@ def main() -> None:
 
     with result_tab:
         _render_generation_status(result)
-        _render_grouped_summary(result.cases)
+        _render_quality_snapshot(result.cases, result.coverage_types)
+        _render_grouped_summary(result.cases, result.coverage_types)
         _render_regenerate_panel(result)
         _render_edit_table(result)
 
     edited_cases = st.session_state.get("edited_cases", result.cases)
 
     with quality_tab:
-        _render_quality_tab(edited_cases)
+        _render_quality_tab(edited_cases, result.coverage_types)
 
     with export_tab:
-        _render_export_tab(edited_cases)
+        _render_export_tab(edited_cases, result.coverage_types)
 
 
-def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_feature: int) -> None:
+def _render_input_tab(mode: str, provider: str, generation_type: str, coverage_types: list[str]) -> None:
     st.subheader("需求模板")
     requirement_file = st.file_uploader(
         "上传需求文件（txt / md / docx）",
@@ -183,7 +197,8 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
             "mode": mode,
             "provider": provider,
             "generation_type": generation_type,
-            "cases_per_feature": cases_per_feature,
+            "cases_per_feature": len(coverage_types),
+            "coverage_types": coverage_types,
         }
 
     pending_generation = st.session_state.get("pending_generation")
@@ -192,6 +207,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
             pending_generation["requirement_text"],
             pending_generation["cases_per_feature"],
             feature_source_text=pending_generation.get("feature_source_text", ""),
+            coverage_types=pending_generation.get("coverage_types", []),
         )
         _render_generation_preview(preview)
 
@@ -244,8 +260,10 @@ def _render_generation_preview(preview: GenerationPreview) -> None:
     st.subheader("生成前预览")
     col1, col2, col3 = st.columns(3)
     col1.metric("识别功能点", len(preview.feature_items))
-    col2.metric("每功能点用例数", preview.cases_per_feature)
+    col2.metric("每功能点覆盖类型", preview.cases_per_feature)
     col3.metric("预计用例数", preview.estimated_case_count)
+    if preview.coverage_types:
+        st.caption("覆盖策略：" + "、".join(preview.coverage_types))
 
     for warning in preview.warnings:
         st.warning(warning)
@@ -265,6 +283,7 @@ def _run_confirmed_generation(pending_generation: dict) -> None:
             provider=pending_generation["provider"],
             generation_type=pending_generation["generation_type"],
             feature_source_text=pending_generation.get("feature_source_text", ""),
+            coverage_types=pending_generation.get("coverage_types", []),
         )
         export_filename = build_export_filename(
             project_name=pending_generation["project_name"],
@@ -278,6 +297,7 @@ def _run_confirmed_generation(pending_generation: dict) -> None:
             "provider": pending_generation["provider"],
             "generation_type": pending_generation["generation_type"],
             "cases_per_feature": pending_generation["cases_per_feature"],
+            "coverage_types": pending_generation.get("coverage_types", []),
         }
         save_generation_result(result, export_filename)
         st.session_state.pop("pending_generation", None)
@@ -301,9 +321,8 @@ def _render_edit_table(result: GenerationResult) -> None:
     warnings = find_case_warnings(edited_cases)
 
     if warnings:
-        with st.expander(f"编辑检查：发现 {len(warnings)} 个提示"):
-            for warning in warnings:
-                st.warning(warning)
+        with st.expander(f"编辑检查：发现 {len(warnings)} 个提示", expanded=False):
+            st.dataframe(_warning_summary_rows(warnings), use_container_width=True, hide_index=True)
 
 
 def _build_requirement_text(
@@ -347,27 +366,97 @@ def _render_generation_status(result: GenerationResult) -> None:
         st.info(result.message)
 
 
-def _render_quality_tab(cases: list[TestCase]) -> None:
+def _render_quality_snapshot(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
+    score = calculate_quality_score(cases, coverage_types)
+    matrix = build_coverage_matrix(cases, coverage_types)
+    covered_count = sum(1 for item in matrix if item.covered)
+
+    st.subheader("质量概览")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("质量评分", score.score)
+    col2.metric("覆盖项", f"{covered_count}/{len(matrix)}")
+    col3.metric("内容扣分", sum(item.points for item in score.deductions))
+    st.caption(score.summary)
+
+    with st.expander("查看覆盖矩阵", expanded=False):
+        st.dataframe(coverage_matrix_to_rows(matrix), use_container_width=True, hide_index=True)
+
+
+def _render_quality_tab(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
     st.subheader("生成质量报告")
-    issues = check_cases(cases)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("总用例数", len(cases))
-    col2.metric("功能点数", len(_group_cases(cases)))
-    col3.metric("质量提示", len(issues))
-    col4.metric("P1/P0", sum(1 for case in cases if case.priority in {"P0", "P1"}))
+    selected_coverage_types = normalize_coverage_types(coverage_types)
+    score = calculate_quality_score(cases, selected_coverage_types)
+    matrix = build_coverage_matrix(cases, selected_coverage_types)
+    st.caption("覆盖检查：" + "、".join(selected_coverage_types))
+    issues = check_cases(cases, selected_coverage_types)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("质量评分", score.score)
+    col2.metric("总用例数", len(cases))
+    col3.metric("功能点数", len(_group_cases(cases)))
+    col4.metric("质量提示", len(issues))
+    col5.metric("覆盖项", f"{sum(1 for item in matrix if item.covered)}/{len(matrix)}")
+    col6.metric("P1/P0", sum(1 for case in cases if case.priority in {"P0", "P1"}))
+    st.info(score.summary)
+
+    with st.expander("覆盖矩阵", expanded=False):
+        st.dataframe(coverage_matrix_to_rows(matrix), use_container_width=True, hide_index=True)
+
+    with st.expander("评分明细", expanded=False):
+        _render_score_details(score)
 
     if not issues:
         st.success("暂无明显质量提示。")
         return
 
-    for issue in issues:
-        if issue.severity == "错误":
-            st.error(f"{issue.case_id}：{issue.message}")
-        else:
-            st.warning(f"{issue.case_id}：{issue.message}")
+    with st.expander("质量提示分类汇总", expanded=False):
+        st.dataframe(_issue_summary_rows(issues), use_container_width=True, hide_index=True)
+
+    with st.expander("质量提示明细", expanded=False):
+        for issue in issues:
+            if issue.severity == "错误":
+                st.error(f"{issue.case_id}：{issue.message}")
+            else:
+                st.warning(f"{issue.case_id}：{issue.message}")
 
 
-def _render_export_tab(cases: list[TestCase]) -> None:
+def _render_score_details(score: QualityScore) -> None:
+    addition_rows = [{"项目": item.label, "分值": item.points} for item in score.additions]
+    deduction_rows = [{"项目": item.label, "分值": item.points} for item in score.deductions]
+    if addition_rows:
+        st.write("加分项")
+        st.dataframe(addition_rows, use_container_width=True, hide_index=True)
+    if deduction_rows:
+        st.write("扣分项")
+        st.dataframe(deduction_rows, use_container_width=True, hide_index=True)
+    if not addition_rows and not deduction_rows:
+        st.caption("暂无评分明细。")
+
+
+def _issue_summary_rows(issues) -> list[dict[str, str | int]]:
+    counter = Counter(_issue_category(issue.message) for issue in issues)
+    return [{"分类": category, "数量": count} for category, count in counter.items()]
+
+
+def _warning_summary_rows(warnings: list[str]) -> list[dict[str, str | int]]:
+    counter = Counter(_issue_category(warning) for warning in warnings)
+    return [{"分类": category, "数量": count} for category, count in counter.items()]
+
+
+def _issue_category(message: str) -> str:
+    if any(keyword in message for keyword in ["缺少用例编号", "缺少用例标题", "缺少操作步骤", "缺少预期结果", "缺少优先级", "用例编号重复"]):
+        return "基础字段"
+    if "操作步骤" in message:
+        return "操作步骤"
+    if "预期结果" in message:
+        return "预期结果"
+    if "测试数据" in message:
+        return "测试数据"
+    if message.startswith("缺少") and "用例" in message:
+        return "覆盖缺口"
+    return "其他"
+
+
+def _render_export_tab(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
     st.subheader("导出")
     filename = st.session_state.get("export_filename", "测试用例.xlsx")
     st.text_input("导出文件名", value=filename, key="export_filename")
@@ -380,6 +469,7 @@ def _render_export_tab(cases: list[TestCase]) -> None:
             actual_mode=result.actual_mode,
             feature_count=len(_group_cases(cases)),
             case_count=len(cases),
+            coverage_types=result.coverage_types,
             provider=result.provider,
             model=result.model,
             message=result.message,
@@ -388,7 +478,7 @@ def _render_export_tab(cases: list[TestCase]) -> None:
         save_generation_result(snapshot, st.session_state.get("export_filename", filename))
         st.success("已保存到 outputs/latest_cases.json，并生成历史快照。")
 
-    excel_bytes = build_excel(cases)
+    excel_bytes = build_excel(cases, coverage_types=coverage_types)
     st.download_button(
         f"导出 Excel（{len(cases)} 条，含质量报告）",
         data=excel_bytes,
@@ -397,7 +487,7 @@ def _render_export_tab(cases: list[TestCase]) -> None:
     )
 
 
-def _render_grouped_summary(cases: list[TestCase]) -> None:
+def _render_grouped_summary(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
     st.subheader("按功能点分组")
     groups = _group_cases(cases)
     if not groups:
@@ -408,7 +498,7 @@ def _render_grouped_summary(cases: list[TestCase]) -> None:
     for tab, (key, group) in zip(tabs, groups.items()):
         with tab:
             st.dataframe(cases_to_rows(group), use_container_width=True, hide_index=True)
-            issues = check_cases(group)
+            issues = check_cases(group, coverage_types)
             if issues:
                 st.caption(f"{key} 检查提示：{len(issues)} 个")
 
@@ -431,9 +521,10 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
                 mode=config.get("mode", "规则生成"),
                 cases_per_feature=config.get("cases_per_feature", 6),
                 provider=config.get("provider", "DeepSeek"),
-            generation_type=config.get("generation_type", "功能测试"),
-            feature_source_text=requirement_text,
-        )
+                generation_type=config.get("generation_type", "功能测试"),
+                feature_source_text=requirement_text,
+                coverage_types=config.get("coverage_types", []),
+            )
 
         kept_cases = [case for case in result.cases if _group_key(case) != selected_group]
         merged_cases = _renumber_cases(kept_cases + regenerated.cases)
@@ -442,6 +533,7 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
             requested_mode=result.requested_mode,
             actual_mode=result.actual_mode,
             provider=result.provider,
+            coverage_types=result.coverage_types,
             feature_count=len(_group_cases(merged_cases)),
             case_count=len(merged_cases),
             model=result.model,

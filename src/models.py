@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 
@@ -26,6 +26,7 @@ class GenerationResult:
     actual_mode: str
     feature_count: int
     case_count: int
+    coverage_types: list[str] = field(default_factory=list)
     provider: str = ""
     model: str = ""
     message: str = ""

@@ -105,3 +105,26 @@ def test_build_excel_adds_quality_report_sheet():
     assert sheet["A1"].value == "指标"
     assert sheet["A2"].value == "总用例数"
     assert sheet["B2"].value == 1
+
+
+def test_build_excel_quality_report_records_coverage_types():
+    case = TestCase(
+        case_id="TC-01-01",
+        module="订单",
+        feature="查询订单",
+        title="查询订单-正常流程",
+        precondition="用户已登录",
+        test_data="订单号：A001",
+        steps="1. 查询\n2. 查看",
+        expected_result="展示订单详情",
+        priority="P1",
+        case_type="功能测试",
+        remark="覆盖类型：正常流程",
+    )
+
+    data = build_excel([case], coverage_types=["正常流程", "弱网/超时"])
+    workbook = load_workbook(BytesIO(data))
+    sheet = workbook["质量报告"]
+
+    assert sheet["A5"].value == "覆盖类型"
+    assert sheet["B5"].value == "正常流程、弱网/超时"

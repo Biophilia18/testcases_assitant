@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+from src.coverage_analyzer import infer_case_coverage_types
+from src.coverage_config import normalize_coverage_types
 from src.models import TestCase
 
 
@@ -16,7 +18,7 @@ class QualityIssue:
 VAGUE_EXPECTED_KEYWORDS = ["正常", "正确", "符合要求", "成功", "通过"]
 
 
-def check_cases(cases: list[TestCase]) -> list[QualityIssue]:
+def check_cases(cases: list[TestCase], coverage_types: list[str] | None = None) -> list[QualityIssue]:
     issues: list[QualityIssue] = []
     case_id_counts = Counter(case.case_id for case in cases if case.case_id)
 
@@ -26,16 +28,17 @@ def check_cases(cases: list[TestCase]) -> list[QualityIssue]:
         if case.case_id and case_id_counts[case.case_id] > 1:
             issues.append(QualityIssue("错误", case.case_id, "用例编号重复。"))
 
-    issues.extend(_check_coverage(cases))
+    issues.extend(_check_coverage(cases, coverage_types))
     return issues
 
 
-def issue_messages(cases: list[TestCase]) -> list[str]:
-    return [f"[{issue.severity}] {issue.case_id} {issue.message}" for issue in check_cases(cases)]
+def issue_messages(cases: list[TestCase], coverage_types: list[str] | None = None) -> list[str]:
+    return [f"[{issue.severity}] {issue.case_id} {issue.message}" for issue in check_cases(cases, coverage_types)]
 
 
-def build_quality_report_rows(cases: list[TestCase]) -> list[list[str | int]]:
-    issues = check_cases(cases)
+def build_quality_report_rows(cases: list[TestCase], coverage_types: list[str] | None = None) -> list[list[str | int]]:
+    selected_coverage_types = normalize_coverage_types(coverage_types)
+    issues = check_cases(cases, selected_coverage_types)
     priority_counts = Counter(case.priority or "未设置" for case in cases)
     type_counts = Counter(case.case_type or "未设置" for case in cases)
     feature_count = len({f"{case.module}:{case.feature}" for case in cases})
@@ -45,6 +48,7 @@ def build_quality_report_rows(cases: list[TestCase]) -> list[list[str | int]]:
         ["总用例数", len(cases)],
         ["功能点数量", feature_count],
         ["质量提示数", len(issues)],
+        ["覆盖类型", "、".join(selected_coverage_types)],
         ["P0 用例数", priority_counts.get("P0", 0)],
         ["P1 用例数", priority_counts.get("P1", 0)],
         ["P2 用例数", priority_counts.get("P2", 0)],
@@ -87,10 +91,34 @@ def _check_case_content(case: TestCase) -> list[QualityIssue]:
     return issues
 
 
-def _check_coverage(cases: list[TestCase]) -> list[QualityIssue]:
+def _check_coverage(cases: list[TestCase], coverage_types: list[str] | None = None) -> list[QualityIssue]:
     if not cases:
         return []
 
+    issues: list[QualityIssue] = []
+    expected_coverage_types = normalize_coverage_types(coverage_types)
+
+    groups: dict[str, list[TestCase]] = {}
+    for case in cases:
+        groups.setdefault(f"{case.module} / {case.feature}", []).append(case)
+
+    for group_key, group_cases in groups.items():
+        covered = set()
+        for case in group_cases:
+            covered.update(_case_coverage_types(case))
+
+        for coverage_type in expected_coverage_types:
+            if coverage_type not in covered:
+                issues.append(QualityIssue("提示", group_key, f"缺少{coverage_type}用例。"))
+
+    return issues
+
+
+def _case_coverage_types(case: TestCase) -> set[str]:
+    return infer_case_coverage_types(case)
+
+
+def _check_legacy_coverage(cases: list[TestCase]) -> list[QualityIssue]:
     case_types = {case.case_type for case in cases}
     issues: list[QualityIssue] = []
 

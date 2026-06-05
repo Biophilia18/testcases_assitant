@@ -26,6 +26,7 @@ def test_generation_result_payload_round_trip():
         actual_mode="规则生成",
         feature_count=1,
         case_count=1,
+        coverage_types=["正常流程", "异常场景"],
         provider="规则生成",
         message="完成",
     )
@@ -36,6 +37,7 @@ def test_generation_result_payload_round_trip():
     assert filename == "订单系统_测试用例.xlsx"
     assert loaded.cases[0].case_id == "TC-01-01"
     assert loaded.case_count == 1
+    assert loaded.coverage_types == ["正常流程", "异常场景"]
 
 
 def test_list_history_files_returns_newest_first(tmp_path, monkeypatch):

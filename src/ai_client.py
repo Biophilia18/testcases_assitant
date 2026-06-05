@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from src.coverage_config import normalize_coverage_types
 from src.env_loader import load_env_file
 from src.models import GenerationResult, TestCase
 from src.prompt_manager import load_prompt
@@ -47,10 +48,12 @@ def generate_cases(
     provider: str = "OpenAI",
     generation_type: str = "功能测试",
     feature_source_text: str = "",
+    coverage_types: list[str] | None = None,
 ) -> GenerationResult:
     load_env_file()
     requested_mode = mode
     source_text = feature_source_text.strip() or requirement_text
+    selected_coverage_types = normalize_coverage_types(coverage_types) if coverage_types is not None else []
 
     if mode == "AI 生成":
         return _generate_with_ai_or_fallback(
@@ -60,14 +63,16 @@ def generate_cases(
             cases_per_feature=cases_per_feature,
             provider=provider,
             generation_type=generation_type,
+            coverage_types=coverage_types,
         )
 
-    cases = generate_rule_based_cases(source_text, cases_per_feature, generation_type)
+    cases = generate_rule_based_cases(source_text, cases_per_feature, generation_type, coverage_types)
     feature_count = len(extract_requirement_items(source_text))
     return GenerationResult(
         cases=cases,
         requested_mode=requested_mode,
         actual_mode="规则生成",
+        coverage_types=selected_coverage_types,
         provider="规则生成",
         feature_count=feature_count,
         case_count=len(cases),
@@ -96,17 +101,20 @@ def _generate_with_ai_or_fallback(
     cases_per_feature: int,
     provider: str,
     generation_type: str,
+    coverage_types: list[str] | None,
 ) -> GenerationResult:
     config = _get_provider_config(provider)
     api_key = os.getenv(config.api_key_env)
     local_feature_count = len(extract_requirement_items(feature_source_text))
+    selected_coverage_types = normalize_coverage_types(coverage_types) if coverage_types is not None else []
 
     if not api_key:
-        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type)
+        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type, coverage_types)
         return GenerationResult(
             cases=cases,
             requested_mode=requested_mode,
             actual_mode="规则生成",
+            coverage_types=selected_coverage_types,
             provider=config.name,
             feature_count=local_feature_count,
             case_count=len(cases),
@@ -115,10 +123,16 @@ def _generate_with_ai_or_fallback(
         )
 
     model = os.getenv(config.model_env, config.default_model)
-    target_count = max(local_feature_count * cases_per_feature, cases_per_feature)
+    target_count = (
+        max(local_feature_count * len(selected_coverage_types), len(selected_coverage_types))
+        if selected_coverage_types
+        else max(local_feature_count * cases_per_feature, cases_per_feature)
+    )
+    coverage_instruction = f"每个功能点优先覆盖这些测试角度：{'、'.join(selected_coverage_types)}。" if selected_coverage_types else ""
     user_prompt = (
         f"请基于以下需求生成不少于 {target_count} 条测试用例。"
         f"用例生成类型：{generation_type}。"
+        f"{coverage_instruction}"
         f"功能点拆分请以“业务流程/需求描述”为主。"
         f"验收标准和补充规则用于补充覆盖点，不要逐条当作独立功能点。"
         f"如业务流程包含多个业务节点，请先拆分节点再分别生成。"
@@ -140,6 +154,7 @@ def _generate_with_ai_or_fallback(
             cases=cases,
             requested_mode=requested_mode,
             actual_mode=f"AI 生成（{config.name}）",
+            coverage_types=selected_coverage_types,
             provider=config.name,
             feature_count=feature_count,
             case_count=len(cases),
@@ -147,12 +162,13 @@ def _generate_with_ai_or_fallback(
             message=f"AI 生成完成：供应商 {config.name}，模型 {model}，返回 {len(cases)} 条测试用例，覆盖 {feature_count} 个功能点。",
         )
     except Exception as exc:
-        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type)
+        cases = generate_rule_based_cases(feature_source_text, cases_per_feature, generation_type, coverage_types)
         reason = f"{type(exc).__name__}: {exc}"
         return GenerationResult(
             cases=cases,
             requested_mode=requested_mode,
             actual_mode="规则生成",
+            coverage_types=selected_coverage_types,
             provider=config.name,
             feature_count=local_feature_count,
             case_count=len(cases),

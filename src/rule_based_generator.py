@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from src.coverage_config import normalize_coverage_types
 from src.models import TestCase
 from src.text_utils import normalize_steps
+from src.title_utils import build_case_remark, build_case_title, build_feature_name
 
 
 ACTION_MODULES = {
@@ -46,12 +48,13 @@ def generate_rule_based_cases(
     requirement_text: str,
     cases_per_feature: int = 6,
     generation_type: str = "功能测试",
+    coverage_types: list[str] | None = None,
 ) -> list[TestCase]:
     items = extract_requirement_items(requirement_text)
     cases: list[TestCase] = []
 
     for item_index, item in enumerate(items, start=1):
-        cases.extend(_build_cases_for_item(item, item_index, cases_per_feature, generation_type))
+        cases.extend(_build_cases_for_item(item, item_index, cases_per_feature, generation_type, coverage_types))
 
     return cases
 
@@ -63,8 +66,8 @@ def extract_requirement_items(requirement_text: str) -> list[RequirementItem]:
 
     for index, block in enumerate(blocks, start=1):
         module = _guess_module(block, index)
-        feature = _guess_feature(block)
-        key = f"{module}:{feature}"
+        feature = _guess_feature(block, module)
+        key = f"{module}:{feature}:{block}"
         if key in seen:
             continue
         seen.add(key)
@@ -78,30 +81,49 @@ def _build_cases_for_item(
     item_index: int,
     cases_per_feature: int,
     generation_type: str,
+    coverage_types: list[str] | None = None,
 ) -> list[TestCase]:
     templates = _templates_for_generation_type(generation_type)
-    normalized_count = max(3, min(cases_per_feature, len(templates)))
+    selected_templates = _select_templates(templates, cases_per_feature, coverage_types)
 
     cases: list[TestCase] = []
-    for case_index, template in enumerate(templates[:normalized_count], start=1):
+    for case_index, template in enumerate(selected_templates, start=1):
         case_id = f"TC-{item_index:02d}-{case_index:02d}"
         cases.append(
             TestCase(
                 case_id=case_id,
                 module=item.module,
                 feature=item.feature,
-                title=f"{item.feature}-{template['title']}",
+                title=build_case_title(item.feature, template["title"]),
                 precondition=template["precondition"].format(item=item),
                 test_data=template["test_data"].format(item=item),
                 steps=normalize_steps(template["steps"].format(item=item)),
                 expected_result=template["expected_result"].format(item=item),
                 priority=template["priority"],
                 case_type=template["case_type"],
-                remark=f"{generation_type}规则生成；需求片段：{item.description[:80]}",
+                remark=build_case_remark(generation_type, template["coverage_type"]),
             )
         )
 
     return cases
+
+
+def _select_templates(
+    templates: list[dict[str, str]],
+    cases_per_feature: int,
+    coverage_types: list[str] | None,
+) -> list[dict[str, str]]:
+    if coverage_types is None:
+        normalized_count = max(3, min(cases_per_feature, len(templates)))
+        return templates[:normalized_count]
+
+    selected: list[dict[str, str]] = []
+    for coverage_type in normalize_coverage_types(coverage_types):
+        matched = next((template for template in templates if template["coverage_type"] == coverage_type), None)
+        if matched:
+            selected.append(matched)
+
+    return selected or templates[: max(3, min(cases_per_feature, len(templates)))]
 
 
 def _templates_for_generation_type(generation_type: str) -> list[dict[str, str]]:
@@ -142,6 +164,9 @@ def _templates_for_generation_type(generation_type: str) -> list[dict[str, str]]
         _template("无权限访问校验", "准备一个无该功能权限的用户账号。", "无权限账号。", "1. 使用无权限账号登录系统。\n2. 尝试访问或执行{item.feature}。", "系统限制访问或操作，并给出符合权限设计的提示。", "P1", "权限测试"),
         _template("重复提交或重复操作校验", "用户已进入对应功能页面，数据处于可操作状态。", "正常业务数据。", "1. 执行{item.feature}。\n2. 在页面未完全返回前重复点击提交、保存或确认。\n3. 查看业务数据结果。", "系统不应产生重复记录、重复扣费、重复状态流转等异常结果。", "P2", "异常测试"),
         _template("结果查询与数据一致性校验", "已成功完成一次正常流程操作。", "已保存的业务数据。", "1. 完成{item.feature}正常操作。\n2. 返回列表、详情页或关联模块查询该数据。\n3. 刷新页面后再次核对。", "列表、详情、关联数据和刷新后的状态保持一致。", "P2", "功能测试"),
+        _template("弱网或超时场景校验", "可模拟弱网、断网或接口超时，用户已进入对应功能页面。", "正常业务数据；弱网或超时环境。", "1. 切换到弱网、断网或模拟接口超时。\n2. 执行{item.feature}。\n3. 恢复网络后再次查看页面和业务数据。", "页面展示加载、失败或重试提示；不会误显示成功，也不会产生错误数据。", "P1", "异常测试", "弱网/超时"),
+        _template("状态流转校验", "业务数据已处于可执行该功能的初始状态。", "可触发状态变化的业务数据。", "1. 查看执行前状态。\n2. 执行{item.feature}。\n3. 查看页面、列表和关联数据状态。", "状态按需求正确流转；前后状态、页面展示和业务记录一致。", "P1", "功能测试", "状态流转"),
+        _template("兼容性校验", "准备不同浏览器、设备或屏幕尺寸环境。", "正常业务数据。", "1. 在不同浏览器、设备或屏幕尺寸下进入{item.module}。\n2. 执行{item.feature}。\n3. 核对页面布局、按钮和结果展示。", "核心流程在不同环境可正常执行，关键内容无遮挡，结果展示一致。", "P3", "兼容性测试"),
     ]
 
 
@@ -153,6 +178,7 @@ def _template(
     expected_result: str,
     priority: str,
     case_type: str,
+    coverage_type: str = "",
 ) -> dict[str, str]:
     return {
         "title": title,
@@ -162,7 +188,29 @@ def _template(
         "expected_result": expected_result,
         "priority": priority,
         "case_type": case_type,
+        "coverage_type": coverage_type or _infer_template_coverage_type(title, case_type),
     }
+
+
+def _infer_template_coverage_type(title: str, case_type: str) -> str:
+    text = f"{title}{case_type}"
+    if any(keyword in text for keyword in ["弱网", "断网", "超时"]):
+        return "弱网/超时"
+    if "状态流转" in text:
+        return "状态流转"
+    if "兼容" in text or "多设备" in text:
+        return "兼容性"
+    if "权限" in text or "鉴权" in text or "登录态" in text:
+        return "权限控制"
+    if "重复" in text or "幂等" in text:
+        return "重复操作"
+    if "边界" in text or "非法" in text or "格式" in text:
+        return "边界/非法输入"
+    if "一致" in text or "查询" in text or "刷新" in text or "响应字段" in text:
+        return "数据一致性"
+    if "异常" in text or "失败" in text or "必填" in text or "缺失" in text:
+        return "异常场景"
+    return "正常流程"
 
 
 def _split_requirement(requirement_text: str) -> list[str]:
@@ -253,10 +301,5 @@ def _guess_module(block: str, index: int) -> str:
     return f"业务模块{index}"
 
 
-def _guess_feature(block: str) -> str:
-    compact = re.sub(r"\s+", "", block)
-    compact = re.sub(r"^(用户|管理员|系统|平台|客服|审核人|财务|仓库|运营)", "", compact)
-    compact = re.sub(r"^(支持|需要|可以|能够|发起|进行|继续|再次)", "", compact)
-    compact = re.sub(r"^(在|进入|对|进行)", "", compact)
-    compact = compact.strip("，,。；;后")
-    return compact
+def _guess_feature(block: str, module: str) -> str:
+    return build_feature_name(module, block)
