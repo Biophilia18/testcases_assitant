@@ -6,7 +6,13 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.exporter import build_excel
 from src.filename_utils import build_export_filename
 from src.models import GenerationResult, TestCase
-from src.persistence import load_generation_result_from_text, load_latest_generation_result, save_generation_result
+from src.persistence import (
+    list_history_files,
+    load_generation_result_from_path,
+    load_generation_result_from_text,
+    load_latest_generation_result,
+    save_generation_result,
+)
 from src.quality_checker import check_cases
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
@@ -93,8 +99,7 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
         if st.button("加载最近一次 JSON"):
             try:
                 result, filename = load_latest_generation_result()
-                st.session_state["generation_result"] = result
-                st.session_state["export_filename"] = filename
+                _set_generation_result(result, filename)
                 st.success("已加载最近一次生成结果。")
                 st.rerun()
             except FileNotFoundError:
@@ -107,12 +112,25 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
         if uploaded_file is not None:
             try:
                 result, filename = load_generation_result_from_text(uploaded_file.read().decode("utf-8"))
-                st.session_state["generation_result"] = result
-                st.session_state["export_filename"] = filename
+                _set_generation_result(result, filename)
                 st.success("已导入历史 JSON。")
                 st.rerun()
             except Exception as exc:
                 st.error(f"导入失败：{exc}")
+
+    history_files = list_history_files()
+    if history_files:
+        history_labels = [path.name for path in history_files]
+        selected_history = st.selectbox("选择本地历史 JSON", history_labels)
+        if st.button("加载所选历史 JSON"):
+            try:
+                selected_path = history_files[history_labels.index(selected_history)]
+                result, filename = load_generation_result_from_path(selected_path)
+                _set_generation_result(result, filename)
+                st.success(f"已加载 {selected_path.name}。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"加载失败：{exc}")
 
     if generate_clicked:
         requirement_text = _build_requirement_text(
@@ -131,18 +149,19 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
             return
 
         with st.spinner("正在生成测试用例..."):
-            st.session_state["generation_result"] = generate_cases(
+            result = generate_cases(
                 requirement_text=requirement_text,
                 mode=mode,
                 cases_per_feature=cases_per_feature,
                 provider=provider,
                 generation_type=generation_type,
             )
-            st.session_state["export_filename"] = build_export_filename(
+            export_filename = build_export_filename(
                 project_name=project_name,
                 business_module=business_module,
                 generation_type=generation_type,
             )
+            _set_generation_result(result, export_filename)
             st.session_state["last_requirement_text"] = requirement_text
             st.session_state["last_generation_config"] = {
                 "mode": mode,
@@ -151,8 +170,8 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
                 "cases_per_feature": cases_per_feature,
             }
             save_generation_result(
-                st.session_state["generation_result"],
-                st.session_state["export_filename"],
+                result,
+                export_filename,
             )
             st.success("生成结果已保存到 outputs/latest_cases.json。")
 
@@ -166,7 +185,7 @@ def _render_edit_table(result: GenerationResult) -> None:
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
-        key="editable_cases",
+        key=f"editable_cases_{st.session_state.get('generation_revision', 0)}",
     )
     edited_cases = rows_to_cases(edited_rows)
     st.session_state["edited_cases"] = edited_cases
@@ -308,7 +327,7 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
 
         kept_cases = [case for case in result.cases if _group_key(case) != selected_group]
         merged_cases = _renumber_cases(kept_cases + regenerated.cases)
-        st.session_state["generation_result"] = GenerationResult(
+        merged_result = GenerationResult(
             cases=merged_cases,
             requested_mode=result.requested_mode,
             actual_mode=result.actual_mode,
@@ -319,6 +338,7 @@ def _render_regenerate_panel(result: GenerationResult) -> None:
             message=f"已重新生成 {selected_group}，当前共 {len(merged_cases)} 条用例。",
             fallback_reason=result.fallback_reason,
         )
+        _set_generation_result(merged_result, st.session_state.get("export_filename", "测试用例.xlsx"))
         st.rerun()
 
 
@@ -357,6 +377,17 @@ def _renumber_cases(cases: list[TestCase]) -> list[TestCase]:
             case.case_id = f"TC-{group_index:02d}-{case_index:02d}"
             renumbered.append(case)
     return renumbered
+
+
+def _set_generation_result(result: GenerationResult, export_filename: str) -> None:
+    st.session_state["generation_result"] = result
+    st.session_state["export_filename"] = export_filename
+    st.session_state["edited_cases"] = result.cases
+    _bump_generation_revision()
+
+
+def _bump_generation_revision() -> None:
+    st.session_state["generation_revision"] = st.session_state.get("generation_revision", 0) + 1
 
 if __name__ == "__main__":
     main()

@@ -29,6 +29,12 @@ def load_latest_generation_result() -> tuple[GenerationResult, str]:
     return load_generation_result_from_path(LATEST_PATH)
 
 
+def list_history_files() -> list[Path]:
+    if not OUTPUT_DIR.exists():
+        return []
+    return sorted(OUTPUT_DIR.glob("cases_*.json"), reverse=True)
+
+
 def load_generation_result_from_path(path: str | Path) -> tuple[GenerationResult, str]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return payload_to_generation_result(payload)
@@ -74,4 +80,3 @@ def payload_to_generation_result(payload: dict[str, Any]) -> tuple[GenerationRes
     )
     export_filename = payload.get("export_filename", "测试用例.xlsx")
     return result, export_filename
-

@@ -1,5 +1,6 @@
 from src.models import GenerationResult, TestCase
-from src.persistence import generation_result_to_payload, payload_to_generation_result
+from src import persistence
+from src.persistence import generation_result_to_payload, list_history_files, payload_to_generation_result
 
 
 def _case() -> TestCase:
@@ -36,3 +37,16 @@ def test_generation_result_payload_round_trip():
     assert loaded.cases[0].case_id == "TC-01-01"
     assert loaded.case_count == 1
 
+
+def test_list_history_files_returns_newest_first(tmp_path, monkeypatch):
+    older = tmp_path / "cases_20260101_100000.json"
+    newer = tmp_path / "cases_20260102_100000.json"
+    other = tmp_path / "latest_cases.json"
+    older.write_text("{}", encoding="utf-8")
+    newer.write_text("{}", encoding="utf-8")
+    other.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(persistence, "OUTPUT_DIR", tmp_path)
+
+    files = list_history_files()
+
+    assert files == [newer, older]

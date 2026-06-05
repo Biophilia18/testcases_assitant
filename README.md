@@ -24,6 +24,7 @@
 - 自动检查用例质量：重复编号、缺字段、步骤过短、预期结果过泛、覆盖类型不足
 - Excel 导出包含边框、筛选、冻结表头、优先级颜色和适配行高
 - 生成结果自动保存为本地 JSON，可导入历史 JSON 继续编辑
+- 可从本地历史 JSON 列表中选择历史记录继续编辑
 - Prompt 文件化，当前功能测试 Prompt 位于 `prompts/functional.md`
 - Excel 导出包含 `测试用例` 和 `质量报告` 两个 sheet
 - 支持 Excel 导出
@@ -148,6 +149,14 @@ outputs/cases_YYYYMMDD_HHMMSS.json
 ```
 
 `outputs/` 是本地运行产物，不提交 Git。
+
+如果导出的 Excel 没有看到 `质量报告` sheet，请先停止旧的 Streamlit 服务并重新启动：
+
+```bash
+streamlit run app.py
+```
+
+旧服务进程可能仍在使用旧版导出代码。
 
 ## 后续优化计划
 
