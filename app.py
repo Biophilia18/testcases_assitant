@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from src.ai_client import generate_cases, is_provider_configured
+from src.document_loader import load_requirement_document
 from src.exporter import build_excel
 from src.filename_utils import build_export_filename
 from src.models import GenerationResult, TestCase
@@ -14,6 +15,7 @@ from src.persistence import (
     save_generation_result,
 )
 from src.quality_checker import check_cases
+from src.requirement_parser import parse_requirement_text
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 
 
@@ -64,31 +66,55 @@ def main() -> None:
 
 def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_feature: int) -> None:
     st.subheader("需求模板")
-    project_name = st.text_input("项目/系统名称", placeholder="例如：电商后台、会员 App、订单管理系统")
+    requirement_file = st.file_uploader(
+        "上传需求文件（txt / md / docx）",
+        type=["txt", "md", "docx"],
+        help="不要求固定格式。能识别的字段会自动填入；识别不到的内容会放入业务流程/需求描述。",
+    )
+    if requirement_file is not None:
+        _apply_uploaded_requirement(requirement_file)
+
+    project_name = st.text_input(
+        "项目/系统名称",
+        key="project_name",
+        placeholder="例如：电商后台、会员 App、订单管理系统",
+    )
 
     col1, col2 = st.columns(2)
     with col1:
-        business_module = st.text_input("业务模块", placeholder="例如：退款管理、用户登录、订单查询")
+        business_module = st.text_input(
+            "业务模块",
+            key="business_module",
+            placeholder="例如：退款管理、用户登录、订单查询",
+        )
     with col2:
-        user_role = st.text_input("使用角色", placeholder="例如：普通用户、客服、管理员")
+        user_role = st.text_input(
+            "使用角色",
+            key="user_role",
+            placeholder="例如：普通用户、客服、管理员",
+        )
 
     precondition = st.text_area(
         "前置条件",
+        key="precondition",
         height=90,
         placeholder="例如：用户已登录；存在可退款订单；客服账号具备审核权限。",
     )
     business_flow = st.text_area(
         "业务流程/需求描述",
+        key="business_flow",
         height=180,
         placeholder="例如：用户登录后查询订单，选择订单提交退款申请，客服审核通过后系统原路退款，用户可导出退款记录。",
     )
     acceptance_criteria = st.text_area(
         "验收标准",
+        key="acceptance_criteria",
         height=120,
         placeholder="例如：退款成功后订单状态变更；审核失败需要展示失败原因；导出文件包含退款单号和金额。",
     )
     constraints = st.text_area(
         "补充规则/异常场景",
+        key="constraints",
         height=100,
         placeholder="例如：重复提交不得产生多条退款单；弱网下不能重复扣款；无权限用户不能审核。",
     )
@@ -174,6 +200,41 @@ def _render_input_tab(mode: str, provider: str, generation_type: str, cases_per_
                 export_filename,
             )
             st.success("生成结果已保存到 outputs/latest_cases.json。")
+
+
+def _apply_uploaded_requirement(uploaded_file) -> None:
+    upload_key = f"{uploaded_file.name}:{uploaded_file.size}"
+    if st.session_state.get("last_requirement_upload") == upload_key:
+        return
+
+    try:
+        raw_text = load_requirement_document(uploaded_file.name, uploaded_file.read())
+    except Exception as exc:
+        st.error(f"需求文件读取失败：{exc}")
+        return
+
+    parsed = parse_requirement_text(raw_text)
+    field_map = {
+        "project_name": parsed.project_name,
+        "business_module": parsed.business_module,
+        "user_role": parsed.user_role,
+        "precondition": parsed.precondition,
+        "business_flow": parsed.business_flow,
+        "acceptance_criteria": parsed.acceptance_criteria,
+        "constraints": parsed.constraints,
+    }
+
+    filled_fields = []
+    for key, value in field_map.items():
+        if value:
+            st.session_state[key] = value
+            filled_fields.append(key)
+
+    st.session_state["last_requirement_upload"] = upload_key
+    if filled_fields:
+        st.success(f"已识别并填充 {len(filled_fields)} 个字段，可继续手动调整。")
+    else:
+        st.warning("未识别到有效内容，请检查文件内容。")
 
 
 def _render_edit_table(result: GenerationResult) -> None:
