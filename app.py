@@ -8,6 +8,7 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
 from src.api_exporter import build_api_excel
 from src.api_models import ApiDocument, ApiTestCase
+from src.api_rule_generator import generate_api_cases
 from src.api_table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
 from src.coverage_config import COVERAGE_TYPE_OPTIONS, DEFAULT_COVERAGE_TYPES, normalize_coverage_types
@@ -47,7 +48,7 @@ def main() -> None:
     with st.sidebar:
         generation_type = st.selectbox("用例生成类型", ["功能测试", "接口测试"], index=0)
         if generation_type == "接口测试":
-            st.caption("接口测试当前为文档解析 MVP：支持文档解析、手动修正、样例编辑和 Excel 导出。")
+            st.caption("接口测试当前为规则生成 MVP：支持文档解析、手动修正、规则生成、编辑和 Excel 导出。")
         else:
             mode = st.radio("生成方式", ["规则生成", "AI 生成"], index=0)
             provider = st.radio("AI 服务商", ["DeepSeek", "OpenAI"], index=0)
@@ -233,7 +234,7 @@ def _render_history_loader() -> None:
 
 def _render_api_test_page() -> None:
     st.title("接口测试用例编辑与导出")
-    st.caption("当前接口测试模式为文档解析 MVP：支持接口文档识别、手动修正、样例用例编辑和 Excel 导出，暂不接 AI。")
+    st.caption("当前接口测试模式为规则生成 MVP：支持接口文档识别、手动修正、规则生成、表格编辑和 Excel 导出，暂不接 AI。")
 
     st.subheader("接口文档输入")
     api_document_text = st.text_area(
@@ -307,11 +308,11 @@ def _render_api_test_page() -> None:
     with st.expander("查看当前接口文档结构化结果", expanded=False):
         st.dataframe(_api_document_preview_rows(document), use_container_width=True, hide_index=True)
 
-    if st.button("生成接口测试样例", type="primary"):
-        st.session_state["api_cases"] = _build_sample_api_cases(document)
+    if st.button("生成接口测试用例", type="primary"):
+        st.session_state["api_cases"] = generate_api_cases(document)
         st.session_state["api_export_filename"] = _build_api_export_filename(project_name, module)
 
-    api_cases: list[ApiTestCase] = st.session_state.get("api_cases") or _build_sample_api_cases(document)
+    api_cases: list[ApiTestCase] = st.session_state.get("api_cases") or generate_api_cases(document)
     st.subheader("接口测试用例编辑")
     edited_rows = st.data_editor(
         api_cases_to_rows(api_cases),
@@ -381,90 +382,6 @@ def _api_document_preview_rows(document: ApiDocument) -> list[dict[str, str]]:
         {"字段": "业务规则", "识别内容": document.business_rules},
         {"字段": "数据库校验", "识别内容": document.db_checks},
     ]
-
-
-def _build_sample_api_cases(document: ApiDocument) -> list[ApiTestCase]:
-    module = document.module.strip() or "接口模块"
-    api_name = document.api_name.strip() or "示例接口"
-    method = document.method.strip() or "POST"
-    path = document.path.strip() or "/api/example"
-    query_params = document.params.strip() or "deviceId=10001"
-    request_body = document.body.strip() or '{"action": "open"}'
-    auth_summary = document.auth.strip() or "有效鉴权信息"
-    headers_summary = document.headers.strip()
-    business_rules = document.business_rules.strip() or "按接口文档业务规则校验。"
-    db_checks = document.db_checks.strip() or "按接口文档检查相关业务数据。"
-    response_example = document.response_example.strip()
-    precondition = f"准备{auth_summary}，接口服务可访问。"
-    if headers_summary:
-        precondition = f"{precondition}\n请求头：{headers_summary}"
-    success_expected = "接口返回成功；响应字段、业务状态和数据记录符合预期。"
-    if response_example:
-        success_expected = f"接口返回成功，响应内容符合接口文档示例。\n参考响应：{response_example}"
-
-    return [
-        ApiTestCase(
-            case_id="API-01-01",
-            module=module,
-            api_name=api_name,
-            method=method,
-            path=path,
-            query_params=query_params,
-            request_body=request_body,
-            precondition=precondition,
-            steps=f"1. 构造{api_name}合法请求\n2. 发送请求\n3. 查看响应和业务数据",
-            expected_status="200",
-            expected_result=success_expected,
-            priority="P1",
-            case_type="接口测试",
-            remark=f"正常请求。业务规则：{business_rules}\n数据库校验：{db_checks}",
-        ),
-        ApiTestCase(
-            case_id="API-01-02",
-            module=module,
-            api_name=api_name,
-            method=method,
-            path=path,
-            query_params=_build_invalid_api_params(query_params),
-            request_body=_build_invalid_api_body(request_body),
-            precondition=precondition,
-            steps=f"1. 构造缺少必填参数的{api_name}请求\n2. 发送请求\n3. 查看错误响应",
-            expected_status="400",
-            expected_result="接口返回明确错误码和错误信息，不产生异常业务数据。",
-            priority="P1",
-            case_type="异常测试",
-            remark="必填参数缺失或字段非法，需要结合接口字段说明补充具体数据。",
-        ),
-        ApiTestCase(
-            case_id="API-01-03",
-            module=module,
-            api_name=api_name,
-            method=method,
-            path=path,
-            query_params=query_params,
-            request_body=request_body,
-            precondition=f"准备无效或无权限的{auth_summary}。",
-            steps=f"1. 使用无效鉴权信息请求{api_name}\n2. 发送请求\n3. 查看鉴权结果",
-            expected_status="401",
-            expected_result="接口拒绝访问，不泄露敏感数据。",
-            priority="P1",
-            case_type="权限测试",
-            remark=f"鉴权失败。鉴权方式：{auth_summary}",
-        ),
-    ]
-
-
-def _build_invalid_api_params(query_params: str) -> str:
-    if not query_params.strip():
-        return "必填参数留空"
-    first_line = query_params.strip().splitlines()[0]
-    return f"{first_line}（置为空或非法值）"
-
-
-def _build_invalid_api_body(request_body: str) -> str:
-    if not request_body.strip():
-        return "必填字段留空"
-    return f"{request_body}\n说明：将必填字段置为空或非法值。"
 
 
 def _build_api_export_filename(project_name: str, module: str) -> str:
