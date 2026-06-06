@@ -1,6 +1,6 @@
-from src.api_models import ApiDocument, ApiTestCase
-from src.api_quality_checker import analyze_api_quality, api_quality_summary
-from src.api_rule_generator import generate_api_cases
+﻿from src.api.models import ApiDocument, ApiTestCase
+from src.api.quality_checker import analyze_api_quality, api_quality_summary
+from src.api.rule_generator import generate_api_cases
 
 
 def _case(case_id: str = "API-01-01", case_type: str = "正常请求") -> ApiTestCase:

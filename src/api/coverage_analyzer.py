@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.api_models import ApiTestCase
+from src.api.models import ApiTestCase
 
 
 API_COVERAGE_ITEMS = [

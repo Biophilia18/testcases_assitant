@@ -1,5 +1,5 @@
-from src.api_models import ApiDocument
-from src.api_rule_generator import generate_api_cases
+﻿from src.api.models import ApiDocument
+from src.api.rule_generator import generate_api_cases
 
 
 def _document() -> ApiDocument:

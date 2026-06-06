@@ -1,9 +1,9 @@
-from io import BytesIO
+﻿from io import BytesIO
 
 from openpyxl import load_workbook
 
-from src.api_exporter import build_api_excel
-from src.api_models import API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
+from src.api.exporter import build_api_excel
+from src.api.models import API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
 
 
 def test_build_api_excel_contains_api_sheet_and_data():

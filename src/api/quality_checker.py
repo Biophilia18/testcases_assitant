@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.api_models import ApiDocument, ApiTestCase
+from src.api.models import ApiDocument, ApiTestCase
 
 
 @dataclass

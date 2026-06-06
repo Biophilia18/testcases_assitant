@@ -1,6 +1,6 @@
-from src.api_coverage_analyzer import API_COVERAGE_ITEMS, api_coverage_matrix_to_rows, build_api_coverage_matrix
-from src.api_models import ApiDocument, ApiTestCase
-from src.api_rule_generator import generate_api_cases
+﻿from src.api.coverage_analyzer import API_COVERAGE_ITEMS, api_coverage_matrix_to_rows, build_api_coverage_matrix
+from src.api.models import ApiDocument, ApiTestCase
+from src.api.rule_generator import generate_api_cases
 
 
 def _api_case(case_id: str, case_type: str, expected_status: str = "200", remark: str = "") -> ApiTestCase:

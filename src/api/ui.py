@@ -1,14 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import streamlit as st
 
-from src.api_coverage_analyzer import api_coverage_matrix_to_rows, build_api_coverage_matrix
-from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
-from src.api_exporter import build_api_excel
-from src.api_models import ApiDocument, ApiTestCase
-from src.api_quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
-from src.api_rule_generator import generate_api_cases
-from src.api_table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
+from src.api.coverage_analyzer import api_coverage_matrix_to_rows, build_api_coverage_matrix
+from src.api.document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
+from src.api.exporter import build_api_excel
+from src.api.models import ApiDocument, ApiTestCase
+from src.api.quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
+from src.api.rule_generator import generate_api_cases
+from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.document_loader import load_requirement_document
 
 
@@ -16,6 +16,7 @@ def render_api_test_page() -> None:
     st.title("接口测试用例编辑与导出")
     st.caption("当前接口测试模式为规则生成 MVP：支持接口文档识别、手动修正、规则生成、表格编辑和 Excel 导出，暂不接 AI。")
 
+    _render_api_progress_summary()
     document_text = _render_api_step_input()
     st.divider()
     document = _render_api_step_document_confirm()
@@ -120,6 +121,10 @@ def _render_api_step_generate(document: ApiDocument, has_document_text: bool) ->
     if not has_document_text and not _has_basic_api_document(document):
         st.info("请先上传/粘贴接口文档，或至少手动填写接口名称、请求方法和接口路径。")
 
+    current_cases: list[ApiTestCase] = st.session_state.get("api_cases") or []
+    if current_cases:
+        _render_api_case_summary(current_cases)
+
     if st.button("生成接口测试用例", type="primary"):
         st.session_state["api_cases"] = generate_api_cases(document)
         st.session_state["api_export_filename"] = _build_api_export_filename(document.project_name, document.module)
@@ -134,6 +139,7 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
         st.info("生成接口测试用例后，这里会展示可编辑表格、覆盖提示矩阵和质量提示。")
         return []
 
+    _render_api_review_summary(api_cases, document)
     edited_rows = st.data_editor(
         api_cases_to_rows(api_cases),
         use_container_width=True,
@@ -157,6 +163,9 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
 
 def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> None:
     st.subheader("Step 5：导出接口 Excel")
+    if not cases:
+        st.info("生成接口测试用例后，可导出包含接口测试用例和接口质量报告的 Excel。")
+
     filename = st.text_input(
         "接口 Excel 文件名",
         value=st.session_state.get("api_export_filename", _build_api_export_filename(document.project_name, document.module)),
@@ -169,6 +178,46 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         disabled=not cases,
     )
+
+
+def _render_api_progress_summary() -> None:
+    cases: list[ApiTestCase] = st.session_state.get("api_cases") or []
+    parsed = bool(st.session_state.get("api_document_parsed"))
+    has_text = bool(str(st.session_state.get("api_document_text", "")).strip())
+    issues = analyze_api_quality(cases) if cases else []
+    error_count = sum(1 for issue in issues if issue.severity == "错误")
+    warning_count = sum(1 for issue in issues if issue.severity == "警告")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("文档输入", "已输入" if has_text else "待输入")
+    col2.metric("解析结果", "已解析" if parsed else "待确认")
+    col3.metric("接口用例", len(cases))
+    col4.metric("质量提示", f"{error_count} 错 / {warning_count} 警")
+    col5.metric("导出状态", "可导出" if cases else "待生成")
+
+
+def _render_api_case_summary(cases: list[ApiTestCase]) -> None:
+    case_types = sorted({case.case_type for case in cases if case.case_type})
+    matrix = build_api_coverage_matrix(cases)
+    covered_count = sum(1 for item in matrix if item.covered)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("当前用例数", len(cases))
+    col2.metric("用例类型", len(case_types))
+    col3.metric("覆盖项", f"{covered_count}/{len(matrix)}")
+    st.caption("重新生成会覆盖当前接口用例；如已手动编辑，建议先导出或确认后再重新生成。")
+
+
+def _render_api_review_summary(cases: list[ApiTestCase], document: ApiDocument) -> None:
+    matrix = build_api_coverage_matrix(cases)
+    covered_count = sum(1 for item in matrix if item.covered)
+    issues = analyze_api_quality(cases, document)
+    summary = api_quality_summary(cases, issues)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("用例数", len(cases))
+    col2.metric("覆盖项", f"{covered_count}/{len(matrix)}")
+    col3.metric("错误", summary["error_count"])
+    col4.metric("警告", summary["warning_count"])
 
 
 def _render_api_coverage_matrix(cases: list[ApiTestCase]) -> None:

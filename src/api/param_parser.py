@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import json
 import re
 from typing import Any
 
-from src.api_models import ApiDocument
+from src.api.models import ApiDocument
 
 
 @dataclass

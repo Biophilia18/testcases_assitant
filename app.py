@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import Counter
 
@@ -30,7 +30,7 @@ from src.regeneration import (
 )
 from src.requirement_parser import parse_requirement_text
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
-from src.ui_api import render_api_test_page
+from src.api.ui import render_api_test_page
 
 
 st.set_page_config(page_title="AI 测试用例助手", layout="wide")

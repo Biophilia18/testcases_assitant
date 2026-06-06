@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from src.api_models import ApiDocument, ApiTestCase
-from src.api_param_parser import ApiParam, parse_api_params
+from src.api.models import ApiDocument, ApiTestCase
+from src.api.param_parser import ApiParam, parse_api_params
 
 
 def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:

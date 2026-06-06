@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 
-from src.api_models import ApiDocument
+from src.api.models import ApiDocument
 
 
 TITLE_TO_FIELD = {

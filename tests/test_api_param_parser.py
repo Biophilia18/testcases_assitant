@@ -1,5 +1,5 @@
-from src.api_models import ApiDocument
-from src.api_param_parser import parse_api_params
+﻿from src.api.models import ApiDocument
+from src.api.param_parser import parse_api_params
 
 
 def test_parse_api_params_extracts_required_type_enum_length_and_range() -> None:

@@ -1,310 +1,125 @@
-# Testcase Assistant Project Context
+# Project Context
 
 ## 项目定位
 
-本项目是一个本地运行的 AI 辅助测试用例生成与编辑工具，当前目标不是做完整平台，而是先把“稳定的测试用例编辑器”打磨好。
+本项目是本地运行的 Streamlit 测试用例助手，目标是稳定完成“需求/接口文档输入 -> 用例生成 -> 表格编辑 -> 质量检查 -> Excel 导出”。
 
-工具入口保持为 Streamlit 单页面应用，不引入 RAG、数据库、FastAPI 或独立前端框架。
+当前版本：`v0.3.4`
 
-## 当前阶段首要目标
+当前约束：
 
-当前阶段目标：稳定、可用、可编辑、可导出的测试用例助手。
+- 不引入 RAG、数据库、FastAPI、独立前端框架。
+- 不做 Swagger/OpenAPI 解析。
+- 不生成 pytest 接口自动化脚本。
+- 不提交 `.env` 或真实 API Key。
 
-优先处理：
+## 当前能力
 
-- 生成结果持久化为本地 JSON 文件
-- 支持导入历史 JSON 继续编辑
-- Prompt 版本管理
-- 页面布局管理
-- 生成质量报告
-- Excel 第二个 sheet 写入质量报告
+功能测试模式：
 
-暂不处理：
+- 支持 `.txt` / `.md` / `.docx` 需求上传和模板填写。
+- 支持规则生成和 AI 生成，AI 失败自动回退规则生成。
+- 支持生成前功能点预览和勾选。
+- 支持用例编辑、单功能点重新生成、质量评分、覆盖提示矩阵。
+- 支持 JSON 历史保存/导入和 Excel 双 sheet 导出。
 
-- RAG
-- GraphRAG
-- 知识图谱
-- 数据库
-- 多用户/权限
-- FastAPI 后端
-- 独立前端框架
-- 复杂文档 OCR
+接口测试模式：
 
-## 生成类型范围
+- 入口位于 `src/api/ui.py`，`app.py` 只负责模式选择和调用。
+- 支持 `.txt` / `.md` 接口文档上传或粘贴。
+- 支持接口字段解析和手动修正。
+- 支持参数解析：参数名、必填、类型、规则、来源。
+- 支持参数级规则生成：必填为空、类型错误、边界/非法值。
+- 支持正常、鉴权、权限、业务规则、幂等、响应断言、数据库校验用例。
+- 支持接口覆盖提示矩阵、接口质量检查、表格编辑。
+- 接口 Excel 包含 `接口测试用例` 和 `接口质量报告`。
 
-当前先只完整打磨“功能测试”。
+## 当前结构
 
-之前页面中出现过：
+```text
+app.py
+src/
+  api/
+    coverage_analyzer.py
+    document_parser.py
+    exporter.py
+    models.py
+    param_parser.py
+    quality_checker.py
+    rule_generator.py
+    table_adapter.py
+    ui.py
+  ai_client.py
+  coverage_analyzer.py
+  coverage_config.py
+  document_loader.py
+  exporter.py
+  feature_selection.py
+  filename_utils.py
+  generation_preview.py
+  models.py
+  persistence.py
+  prompt_manager.py
+  quality_checker.py
+  quality_score.py
+  regeneration.py
+  requirement_parser.py
+  rule_based_generator.py
+  table_adapter.py
+  text_utils.py
+  title_utils.py
+tests/
+examples/
+prompts/
+outputs/
+```
 
-- 功能测试
-- 接口测试
-- Web UI 测试
-- App 测试
+## 关键文件
 
-当前阶段已开始接口测试第一阶段适配。接口测试先做 md/txt 文档上传解析、手动修正、参数解析、参数级规则生成、覆盖提示矩阵、质量检查、表格编辑和 Excel 双 sheet 导出，不接 AI、不做自动化脚本生成。
+- `app.py`：Streamlit 入口和模式选择。
+- `src/api/ui.py`：接口测试页面 5 步流程。
+- `src/api/models.py`：接口用例模型和接口 Excel 列定义。
+- `src/api/document_parser.py`：接口文档标题解析。
+- `src/api/param_parser.py`：接口参数解析。
+- `src/api/rule_generator.py`：接口规则生成。
+- `src/api/quality_checker.py`：接口质量检查。
+- `src/api/coverage_analyzer.py`：接口覆盖提示矩阵。
+- `src/api/exporter.py`：接口 Excel 双 sheet 导出。
+- `src/models.py`：功能测试用例模型。
+- `src/rule_based_generator.py`：功能测试规则生成。
+- `src/ai_client.py`：DeepSeek/OpenAI 调用和回退。
 
-## 已实现能力
+## 接口用例字段
 
-- Streamlit 单页面入口
-- 需求模板输入
-- DeepSeek / OpenAI API Key 从 `.env` 自动读取
-- 无 API Key 或 API 调用失败时回退到规则生成
-- 测试用例规则生成
-- AI JSON 数组解析
-- AI steps 数组清理为多行编号步骤
-- 测试用例可编辑表格
-- 编辑后导出 Excel
-- Excel 自动文件名
-- Excel 样式优化
-  - 表头样式
-  - 冻结表头
-  - 自动筛选
-  - 边框
-  - 优先级颜色
-  - 步骤换行
-  - 行高适配
-- 按模块/功能点分组查看
-- 单功能点重新生成
-- 质量检查
-  - 重复编号
-  - 缺字段
-  - 步骤过短
-  - 预期结果过泛
-  - 缺少异常/边界/权限覆盖
-- pytest 测试覆盖主要逻辑
-- 生成结果本地持久化
-- 导入历史 JSON 继续编辑
-- Prompt 文件化
-- 页面 tabs 布局
-- Excel 第二个 sheet 输出质量报告
-- 本地历史 JSON 列表选择加载
-- 生成/导入/重生成后刷新编辑表格状态，避免旧表格残留
-- 支持 `.txt` / `.md` / `.docx` 需求文本上传并自动填充模板字段
-- 需求解析支持组合标题，例如 `项目/系统名称`、`业务流程/需求描述`、`补充规则/异常场景`
-- `.docx` 当前只抽取正文段落文本，不处理图片、表格、批注或 OCR
-- 支持生成前预览与确认，确认前不会调用 AI
-- 生成前预览和规则生成数量以“业务流程/需求描述”为功能点抽取来源
-- 完整需求仍传入 AI prompt，验收标准和异常规则作为覆盖约束，不逐条当作独立功能点
-- 功能点名称不再做固定长度截断，避免预览和规则生成标题丢失关键文字
-- 页面侧边栏支持覆盖类型配置
-  - 默认：正常流程、异常场景、边界/非法输入、权限控制、重复操作、数据一致性
-  - 可选：弱网/超时、状态流转、兼容性
-- 生成前预览按“功能点数 × 覆盖类型数”估算用例数量
-- 规则生成会按所选覆盖类型选择模板，不再只是固定截取前 N 条模板
-- AI prompt 会带上所选覆盖类型，要求每个功能点优先覆盖这些测试角度
-- 质量检查会按功能点检查覆盖类型缺口
-- Excel `质量报告` sheet 会记录本次覆盖类型并展示覆盖缺口
-- 本地 JSON 持久化会保存 `coverage_types`，导入历史后继续使用当时的覆盖策略
-- v0.2.1 增强生成结果质量判断能力
-  - 新增覆盖矩阵，展示覆盖项、是否覆盖、命中用例编号和建议说明
-  - 新增 0-100 质量评分，基于覆盖加分和内容问题扣分
-  - 生成结果区域展示质量评分和覆盖概览
-  - 质量检查区域默认折叠，编辑检查提示按分类汇总
-  - 增加 `examples/` 示例需求文件
-- 页面改为步骤式主流程
-  - Step 1：需求输入
-  - Step 2：生成计划预览
-  - Step 3：生成结果
-  - Step 4：编辑与质量检查
-  - Step 5：保存与导出
-- 功能点预览改为表格
-  - 支持“参与生成”勾选
-  - 取消勾选的功能点不会进入后续生成
-- 历史 JSON 加载入口移动到侧边栏折叠区，避免挤占主流程
-- 单功能点重新生成增强
-  - 重新生成时带上原始完整需求上下文
-  - 支持侧重点：综合补全、异常场景、边界场景、权限场景、数据一致性
-  - 重新生成后保留原功能点编号段，避免整批编号漂移
-- 接口测试第一阶段 MVP
-  - 侧边栏新增“接口测试”模式
-  - 接口测试独立于功能测试流程
-  - 支持接口文档大文本输入
-  - 支持上传 `.txt` / `.md` 接口文档并自动解析填充
-  - 支持按标题解析项目/系统名称、业务模块、接口名称、请求方法、接口路径、鉴权方式、请求头、请求参数、请求体、响应示例、业务规则、数据库校验
-  - 支持解析结果手动修正
-  - 支持基于解析结果进行接口规则生成
-  - 支持从请求参数和请求体中解析参数名、必填、类型、规则和来源
-  - 支持对具体参数生成必填为空、类型错误、边界/非法值用例
-  - 当前覆盖正常请求、参数校验、鉴权校验、权限校验、业务规则、重复请求/幂等性、响应字段断言、数据库校验
-  - 接口页面采用步骤式流程：接口文档输入、解析结果确认与修正、生成接口测试用例、编辑与质量检查、导出接口 Excel
-  - 支持接口覆盖提示矩阵，展示覆盖项、是否覆盖、命中用例和建议说明
-  - 支持接口质量检查，提示基础字段、请求头、断言点、参数校验、鉴权、权限、业务规则、响应断言、数据库校验和变量提取建议
-  - 支持 ApiTestCase 表格编辑、接口 Excel 导出
-  - 接口 Excel 包含 `接口测试用例` 和 `接口质量报告` 两个 sheet
-  - 暂不接 AI、不生成 pytest 脚本、不接 RAG
-- 优化规则生成结果可读性
-  - 长需求片段不再直接作为用例标题
-  - `feature` 字段尽量提取为短业务功能名，例如设备基础控制、控制指令发送、状态更新、失败提示、弱网处理
-  - 用例标题格式为“短功能名-覆盖场景”
-  - 备注改为简洁说明，不再塞入长需求原文
+```text
+用例编号、模块、接口名称、请求方法、接口路径、请求头、请求参数、请求体、
+前置条件、操作步骤、预期状态码、断言点、数据库校验、变量提取、
+优先级、用例类型、备注
+```
 
-## 当前核心文件
+## 验证方式
 
-- `app.py`：Streamlit 页面入口
-- `src/ui_api.py`：接口测试页面渲染入口和步骤式 UI
-- `src/models.py`：测试用例数据模型、Excel 列顺序
-- `src/api_models.py`：接口测试用例数据模型和接口 Excel 列定义
-- `src/api_document_parser.py`：接口文档标题解析、字段回填转换
-- `src/api_param_parser.py`：接口参数解析，输出参数名、必填、类型、规则和来源
-- `src/api_rule_generator.py`：接口规则生成器，根据 `ApiDocument` 生成 `ApiTestCase`
-- `src/api_coverage_analyzer.py`：接口覆盖提示矩阵构建
-- `src/api_quality_checker.py`：接口质量检查，输出分类问题和统一建议
-- `src/api_table_adapter.py`：接口测试页面表格和 `ApiTestCase` 互转
-- `src/api_exporter.py`：接口测试 Excel 导出
-- `src/coverage_config.py`：覆盖类型选项、默认值、覆盖类型识别关键词
-- `src/coverage_analyzer.py`：覆盖矩阵构建和单条用例覆盖类型识别
-- `src/quality_score.py`：质量评分、加分项、扣分项和评分结论
-- `src/feature_selection.py`：生成前功能点表格行转换、选择结果转生成来源文本
-- `src/regeneration.py`：单功能点重新生成上下文、侧重点映射和稳定编号替换
-- `src/ai_client.py`：AI 调用、Prompt 构造、JSON 解析
-- `src/rule_based_generator.py`：规则生成
-- `src/table_adapter.py`：页面表格和 `TestCase` 互转
-- `src/exporter.py`：Excel 导出
-- `src/text_utils.py`：步骤格式化
-- `src/title_utils.py`：短功能名、用例标题、备注文案生成
-- `src/filename_utils.py`：导出文件名生成
-- `src/quality_checker.py`：用例质量检查
-- `src/persistence.py`：生成结果 JSON 保存和读取
-- `src/prompt_manager.py`：Prompt 文件读取
-- `prompts/functional.md`：功能测试 Prompt
-- `outputs/`：本地生成结果，不提交 Git
-- `tests/`：pytest 测试
-- `examples/`：功能测试示例需求和接口文档示例
-- `.env`：真实 API Key，本地使用，不提交 Git
+全量测试：
 
-## 当前 Excel 字段顺序
+```powershell
+.\.venv\Scripts\python -m pytest -q
+```
 
-字段顺序以 `src/models.py` 的 `EXCEL_COLUMNS` 为准。
+最近一次重构后测试结果：`94 passed`。
 
-当前顺序：
+人工验证重点：
 
-1. 用例编号
-2. 模块
-3. 用例标题
-4. 优先级
-5. 前置条件
-6. 测试数据
-7. 操作步骤
-8. 预期结果
-9. 用例类型
-10. 功能点
-11. 备注
+- 功能测试页面能正常进入、预览、生成、编辑、导出。
+- 接口测试页面能上传 `examples/api_smart_home_device_control.md` 并生成用例。
+- 接口 Excel 应包含 `接口测试用例` 和 `接口质量报告`。
 
-代码里已经有列名到字段名的映射。后续如果只调整展示和导出顺序，优先修改 `EXCEL_COLUMNS`。
+## 当前下一步
 
-## 当前 Git 工作流
+建议先稳定现有结构，不继续新增大功能。
 
-- `main`：稳定版本
-- `dev`：开发版本
+可选后续：
 
-当前功能开发应在 `dev` 分支完成。
-
-常规节奏：
-
-1. 一个完整功能点完成
-2. 测试通过
-3. 本地 commit
-4. push 到 `origin/dev`
-5. 试用稳定后再考虑合并到 `main`
-
-## 下一步计划
-
-本轮计划状态：
-
-已完成：
-
-1. 增加本地 JSON 持久化
-   - 生成后保存到 `outputs/latest_cases.json`
-   - 同时按时间保存历史快照
-2. 增加导入历史 JSON 继续编辑
-   - 页面支持上传 JSON
-   - 支持加载最近一次生成结果
-3. Prompt 版本管理
-   - 把功能测试 Prompt 放入 `prompts/functional.md`
-   - AI 调用时从文件读取
-4. 页面布局管理
-   - 使用 Streamlit tabs 分为：
-     - 需求输入
-     - 生成结果
-     - 质量检查
-     - 导出
-5. Excel 增加第二个 sheet
-   - Sheet1：测试用例
-   - Sheet2：质量报告
-6. 覆盖类型配置与覆盖检查联动
-   - 页面可选择覆盖类型
-   - 预览显示覆盖策略和预计用例数
-   - 规则生成按覆盖类型选模板
-   - AI prompt 同步覆盖类型
-   - 质量检查按功能点提示覆盖缺口
-   - Excel 质量报告和历史 JSON 保存覆盖策略
-7. 生成质量评估增强
-   - `coverage_analyzer.py` 输出覆盖矩阵
-   - `quality_score.py` 输出 0-100 质量评分
-   - 页面展示质量评分、覆盖矩阵和分类汇总
-   - 质量检查区域默认折叠，避免逐条刷屏
-   - 增加家政、物料、智能家居方向示例需求
-8. 页面操作体验优化
-   - 从多 Tab 改为步骤式主流程
-   - 功能点预览支持参与生成选择
-   - 历史 JSON 区域折叠到侧边栏
-   - 单功能点重新生成支持侧重点和稳定编号
-9. 接口测试模式第一阶段
-   - 新增 API 独立数据模型
-   - 新增 API 表格适配
-   - 新增 API Excel 导出
-   - app.py 提供接口测试独立页面入口
-10. 接口文档解析 MVP
-   - 新增 `ApiDocument` 数据模型
-   - 新增 `api_document_parser.py`
-   - 接口测试页面支持粘贴接口文档、解析预览、手动修正
-   - 生成的接口用例会引用解析出的参数、请求体、鉴权、业务规则和数据库校验
-11. v0.3.1 接口规则生成器
-   - 新增 `api_rule_generator.py`
-   - `generate_api_cases(document)` 根据 `ApiDocument` 生成接口用例
-   - 页面按钮改为“生成接口测试用例”
-   - 编号按 `API-01-01`、`API-01-02` 连续生成
-   - 至少保留正常请求、参数校验、鉴权校验三类基础用例
-12. 接口质量检查
-   - 新增 `api_quality_checker.py`
-   - 页面展示接口用例数、覆盖类型数、错误数、警告数
-   - 分类提示基础字段、参数校验、鉴权、权限、业务规则、响应断言、数据库校验缺口
-   - 质量提示默认折叠，避免挤占接口编辑主流程
-13. 接口文档上传和接口 Excel 质量报告
-   - 接口模式支持上传 `.txt` / `.md` 文档并自动解析
-   - 新增接口示例文档：`examples/api_smart_home_device_control.md`
-   - 新增接口示例文档：`examples/api_housekeeping_appointment.txt`
-   - `build_api_excel` 增加 `接口质量报告` sheet
-   - 接口质量报告包含接口信息、用例数、覆盖类型数、错误数、警告数和质量提示
-14. v0.3.2 接口页面体验优化
-   - 新增 `src/ui_api.py`，接口页面从 `app.py` 迁移出去
-   - `app.py` 只负责模式选择和调用 `render_api_test_page`
-   - 接口页面改成 5 步流程
-   - 新增 `api_coverage_analyzer.py`
-   - 页面新增接口覆盖提示矩阵，保留原有接口质量提示表
-   - 重新解析或上传新接口文档时会清空旧接口用例，避免新文档混用旧结果
-15. v0.3.3 接口字段增强与参数级规则生成
-   - `ApiTestCase` 新增 `headers`、`assertions`、`db_check`、`extract_vars`
-   - 接口 Excel 列改为：请求头、请求参数、请求体、断言点、数据库校验、变量提取等更贴近接口测试的字段
-   - 新增 `api_param_parser.py`
-   - `api_rule_generator.py` 使用参数解析结果生成具体参数用例
-   - `api_quality_checker.py` 增加请求头、断言点、数据库校验、变量提取提示
-
-下一步候选：
-
-- 将覆盖矩阵和质量评分同步写入 Excel `质量报告` sheet
-- 接口测试结果本地 JSON 保存和历史导入
-- 继续观察规则/AI 生成规模：已避免把项目名、验收标准和异常规则直接拆成独立功能点；后续可再优化业务流程内部拆分粒度
-- 进一步优化表格编辑体验
-- 优化 AI 返回用例的覆盖类型识别，让 AI 结果也能更稳定地通过覆盖检查
-- 增加 Word 表格文本抽取
-- 增加页面版本号/运行状态提示，避免旧 Streamlit 服务造成误判
-
-## 重要约束
-
-- 不要提交真实 `.env`
-- 不要泄露 API Key
-- 保持代码简单，适合初学者阅读
-- 不要引入数据库或复杂服务
-- 不要把功能做成多页面/多框架系统
-- 优先让当前工具稳定可用，再进入 RAG/知识增强方向
+- 统一功能测试和接口测试的历史 JSON 管理。
+- 提升接口参数解析对表格化字段说明的支持。
+- 观察接口规则生成结果，减少误判和重复用例。
+- 稳定后再考虑功能测试模块继续分包。

@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
-from src.api_models import API_COLUMN_TO_FIELD, API_EXCEL_COLUMNS, ApiTestCase
+from src.api.models import API_COLUMN_TO_FIELD, API_EXCEL_COLUMNS, ApiTestCase
 from src.text_utils import normalize_steps
 
 

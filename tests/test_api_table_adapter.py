@@ -1,5 +1,5 @@
-from src.api_models import ApiTestCase
-from src.api_table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
+﻿from src.api.models import ApiTestCase
+from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 
 
 def _api_case() -> ApiTestCase:

@@ -1,4 +1,4 @@
-from src.api_document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
+﻿from src.api.document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
 from pathlib import Path
 
 

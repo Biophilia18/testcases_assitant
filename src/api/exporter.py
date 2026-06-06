@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from io import BytesIO
 
@@ -6,8 +6,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from src.api_models import API_COLUMN_TO_FIELD, API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
-from src.api_quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
+from src.api.models import API_COLUMN_TO_FIELD, API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
+from src.api.quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
 from src.text_utils import normalize_steps
 
 
