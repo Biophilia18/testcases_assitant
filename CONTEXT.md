@@ -41,7 +41,7 @@
 - Web UI 测试
 - App 测试
 
-当前阶段已开始接口测试第一阶段适配。接口测试先做 md/txt 文档上传解析、手动修正、规则生成、质量检查、表格编辑和 Excel 双 sheet 导出，不接 AI、不做自动化脚本生成。
+当前阶段已开始接口测试第一阶段适配。接口测试先做 md/txt 文档上传解析、手动修正、规则生成、覆盖提示矩阵、质量检查、表格编辑和 Excel 双 sheet 导出，不接 AI、不做自动化脚本生成。
 
 ## 已实现能力
 
@@ -124,6 +124,8 @@
   - 支持解析结果手动修正
   - 支持基于解析结果进行接口规则生成
   - 当前覆盖正常请求、参数校验、鉴权校验、权限校验、业务规则、重复请求/幂等性、响应字段断言、数据库校验
+  - 接口页面采用步骤式流程：接口文档输入、解析结果确认与修正、生成接口测试用例、编辑与质量检查、导出接口 Excel
+  - 支持接口覆盖提示矩阵，展示覆盖项、是否覆盖、命中用例和建议说明
   - 支持接口质量检查，提示基础字段、参数校验、鉴权、权限、业务规则、响应断言、数据库校验缺口
   - 支持 ApiTestCase 表格编辑、接口 Excel 导出
   - 接口 Excel 包含 `接口测试用例` 和 `接口质量报告` 两个 sheet
@@ -137,10 +139,12 @@
 ## 当前核心文件
 
 - `app.py`：Streamlit 页面入口
+- `src/ui_api.py`：接口测试页面渲染入口和步骤式 UI
 - `src/models.py`：测试用例数据模型、Excel 列顺序
 - `src/api_models.py`：接口测试用例数据模型和接口 Excel 列定义
 - `src/api_document_parser.py`：接口文档标题解析、字段回填转换
 - `src/api_rule_generator.py`：接口规则生成器，根据 `ApiDocument` 生成 `ApiTestCase`
+- `src/api_coverage_analyzer.py`：接口覆盖提示矩阵构建
 - `src/api_quality_checker.py`：接口质量检查，输出分类问题和统一建议
 - `src/api_table_adapter.py`：接口测试页面表格和 `ApiTestCase` 互转
 - `src/api_exporter.py`：接口测试 Excel 导出
@@ -269,6 +273,13 @@
    - 新增接口示例文档：`examples/api_housekeeping_appointment.txt`
    - `build_api_excel` 增加 `接口质量报告` sheet
    - 接口质量报告包含接口信息、用例数、覆盖类型数、错误数、警告数和质量提示
+14. v0.3.2 接口页面体验优化
+   - 新增 `src/ui_api.py`，接口页面从 `app.py` 迁移出去
+   - `app.py` 只负责模式选择和调用 `render_api_test_page`
+   - 接口页面改成 5 步流程
+   - 新增 `api_coverage_analyzer.py`
+   - 页面新增接口覆盖提示矩阵，保留原有接口质量提示表
+   - 重新解析或上传新接口文档时会清空旧接口用例，避免新文档混用旧结果
 
 下一步候选：
 
