@@ -43,6 +43,16 @@ def test_generate_api_cases_includes_param_level_empty_type_and_boundary_cases()
     assert any("deviceId" in case.remark and "边界" in case.remark for case in cases)
 
 
+def test_generate_api_cases_keeps_body_fields_out_of_query_params_when_duplicated() -> None:
+    cases = generate_api_cases(_document())
+    normal_case = cases[0]
+
+    assert "deviceId" in normal_case.query_params
+    assert "action" not in normal_case.query_params
+    assert "mode" not in normal_case.query_params
+    assert "action" in normal_case.request_body
+
+
 def test_generate_api_cases_includes_business_rule_case_when_rules_exist() -> None:
     cases = generate_api_cases(_document())
 

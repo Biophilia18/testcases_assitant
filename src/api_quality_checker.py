@@ -257,5 +257,7 @@ def _is_weak_assertion(assertion: str) -> bool:
 
 
 def _may_need_extract_vars(case: ApiTestCase) -> bool:
+    if case.expected_status != "200":
+        return False
     text = f"{case.assertions} {case.remark} {case.case_type}"
     return any(keyword in text for keyword in ["id", "ID", "编号", "token", "Token", "appointmentNo"])

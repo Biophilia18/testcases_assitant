@@ -69,22 +69,44 @@ def _parse_body_params(body: str) -> list[ApiParam]:
 
 
 def _merge_params(params: list[ApiParam]) -> list[ApiParam]:
-    merged: dict[tuple[str, str], ApiParam] = {}
+    merged_by_source: dict[tuple[str, str], ApiParam] = {}
     for param in params:
         key = (param.name, param.source)
-        if key not in merged:
-            merged[key] = param
+        if key not in merged_by_source:
+            merged_by_source[key] = param
             continue
 
-        current = merged[key]
-        merged[key] = ApiParam(
+        current = merged_by_source[key]
+        merged_by_source[key] = ApiParam(
             name=current.name,
             required=current.required or param.required,
             param_type=current.param_type or param.param_type,
             rule=_join_unique(current.rule, param.rule),
             source=current.source,
         )
-    return list(merged.values())
+
+    grouped_by_name: dict[str, list[ApiParam]] = {}
+    for param in merged_by_source.values():
+        grouped_by_name.setdefault(param.name, []).append(param)
+
+    merged: list[ApiParam] = []
+    for same_name_params in grouped_by_name.values():
+        body_param = next((param for param in same_name_params if param.source == "body"), None)
+        if body_param:
+            merged.append(_merge_same_name_params(body_param, same_name_params))
+        else:
+            merged.extend(same_name_params)
+    return merged
+
+
+def _merge_same_name_params(primary: ApiParam, params: list[ApiParam]) -> ApiParam:
+    return ApiParam(
+        name=primary.name,
+        required=any(param.required for param in params),
+        param_type=primary.param_type or next((param.param_type for param in params if param.param_type), ""),
+        rule="\n".join(_unique_non_empty(param.rule for param in params)),
+        source=primary.source,
+    )
 
 
 def _split_name_and_description(line: str) -> tuple[str, str]:
@@ -183,8 +205,12 @@ def _type_from_value(value: Any) -> str:
 
 def _join_unique(left: str, right: str) -> str:
     parts = [part for part in [left.strip(), right.strip()] if part]
+    return "\n".join(_unique_non_empty(parts))
+
+
+def _unique_non_empty(parts) -> list[str]:
     unique_parts = []
     for part in parts:
-        if part not in unique_parts:
+        if part and part not in unique_parts:
             unique_parts.append(part)
-    return "\n".join(unique_parts)
+    return unique_parts

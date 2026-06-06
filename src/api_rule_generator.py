@@ -264,6 +264,9 @@ def _valid_precondition(document: ApiDocument) -> str:
 
 
 def _valid_params(document: ApiDocument) -> str:
+    query_params = [param for param in parse_api_params(document) if param.source == "query"]
+    if query_params:
+        return "\n".join(_format_param(param) for param in query_params)
     return document.params.strip() or "按接口文档填写合法请求参数"
 
 
@@ -319,3 +322,14 @@ def _auth_remark(document: ApiDocument, fallback: str) -> str:
 def _has_boundary_rule(param: ApiParam) -> bool:
     text = f"{param.rule} {param.name}"
     return any(keyword in text for keyword in ["长度", "范围", "大于", "小于", "枚举", "允许值", "取值", "格式", "手机号", "不能早于", "不能晚于"])
+
+
+def _format_param(param: ApiParam) -> str:
+    parts = [param.name]
+    if param.required:
+        parts.append("必填")
+    if param.param_type:
+        parts.append(param.param_type)
+    if param.rule:
+        parts.append(param.rule)
+    return "，".join(parts)

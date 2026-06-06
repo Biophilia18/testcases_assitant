@@ -48,3 +48,18 @@ def test_parse_api_params_supports_newline_list_and_dunhao() -> None:
     assert params[0].required is True
     assert params[0].param_type == "string"
     assert "允许值" in params[0].rule
+
+
+def test_parse_api_params_merges_body_json_field_rules_from_field_descriptions() -> None:
+    document = ApiDocument(
+        params="action：控制动作，必填，允许值 open、close\nmode：工作模式，必填，允许值 auto、manual",
+        body='{"action":"open","mode":"auto"}',
+    )
+
+    params = parse_api_params(document)
+    by_name = {param.name: param for param in params}
+
+    assert len([param for param in params if param.name == "action"]) == 1
+    assert by_name["action"].source == "body"
+    assert by_name["action"].param_type == "string"
+    assert "允许值 open、close" in by_name["action"].rule
