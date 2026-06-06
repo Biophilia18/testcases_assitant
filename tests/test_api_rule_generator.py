@@ -11,8 +11,8 @@ def _document() -> ApiDocument:
         path="/api/devices/{deviceId}/control",
         auth="Bearer Token",
         headers="Authorization: Bearer token\nContent-Type: application/json",
-        params="deviceId：设备ID，必填",
-        body='{"action":"open"}',
+        params="deviceId：设备ID，必填，integer，范围大于0",
+        body='{"action":"open","mode":"auto"}',
         response_example='{"code":0,"message":"success"}',
         business_rules="设备在线才允许控制",
         db_checks="设备状态记录更新",
@@ -35,6 +35,14 @@ def test_generate_api_cases_includes_parameter_validation_when_request_data_exis
     assert any("错误类型" in case.remark or "错误类型" in case.steps for case in parameter_cases)
 
 
+def test_generate_api_cases_includes_param_level_empty_type_and_boundary_cases() -> None:
+    cases = generate_api_cases(_document())
+
+    assert any("deviceId" in case.remark and "为空" in case.remark for case in cases)
+    assert any("deviceId" in case.remark and "类型错误" in case.remark for case in cases)
+    assert any("deviceId" in case.remark and "边界" in case.remark for case in cases)
+
+
 def test_generate_api_cases_includes_business_rule_case_when_rules_exist() -> None:
     cases = generate_api_cases(_document())
 
@@ -47,7 +55,7 @@ def test_generate_api_cases_includes_database_check_case_when_db_checks_exist() 
     cases = generate_api_cases(_document())
 
     db_case = next(case for case in cases if case.case_type == "数据库校验")
-    assert "设备状态记录更新" in db_case.expected_result
+    assert "设备状态记录更新" in db_case.db_check
     assert db_case.expected_status == "200"
 
 

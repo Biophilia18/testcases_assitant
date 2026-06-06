@@ -10,12 +10,15 @@ def _case(case_id: str = "API-01-01", case_type: str = "正常请求") -> ApiTes
         api_name="设备控制接口",
         method="POST",
         path="/api/devices/{deviceId}/control",
+        headers="Authorization: Bearer token",
         query_params="deviceId=10001",
         request_body='{"action":"open"}',
         precondition="准备有效 Token",
         steps="1. 构造合法请求\n2. 发送请求\n3. 查看响应",
         expected_status="200",
-        expected_result="接口返回成功，响应字段符合接口文档。",
+        assertions="接口返回成功，响应字段符合接口文档。",
+        db_check="",
+        extract_vars="",
         priority="P1",
         case_type=case_type,
         remark="正常请求",
@@ -77,7 +80,7 @@ def test_analyze_api_quality_accepts_generated_api_cases() -> None:
 
 def test_api_quality_summary_counts_issue_levels() -> None:
     case = _case()
-    case.expected_result = "成功"
+    case.assertions = "成功"
     issues = analyze_api_quality([case])
     summary = api_quality_summary([case], issues)
 

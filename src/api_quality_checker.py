@@ -66,7 +66,7 @@ def _required_field_issues(cases: list[ApiTestCase]) -> list[ApiQualityIssue]:
         ("接口路径", lambda case: bool(case.path.strip()), "补充接口路径，例如 /api/orders。"),
         ("操作步骤", lambda case: bool(case.steps.strip()), "补充构造请求、发送请求、检查响应等可执行步骤。"),
         ("预期状态码", lambda case: bool(case.expected_status.strip()), "补充预期 HTTP 状态码或业务状态码。"),
-        ("预期结果", lambda case: bool(case.expected_result.strip()), "补充响应字段、错误信息、业务数据或数据库变化。"),
+        ("断言点", lambda case: bool(case.assertions.strip()), "补充状态码、业务码、响应字段、错误信息或业务数据变化断言。"),
     ]
 
     issues: list[ApiQualityIssue] = []
@@ -121,6 +121,19 @@ def _coverage_issues(cases: list[ApiTestCase], document: ApiDocument) -> list[Ap
             )
         )
 
+    if document.headers.strip():
+        case_ids = [case.case_id for case in cases if not case.headers.strip()]
+        if case_ids:
+            issues.append(
+                ApiQualityIssue(
+                    category="请求头",
+                    severity="警告",
+                    case_ids=case_ids,
+                    message="接口文档包含请求头，但部分用例缺少请求头。",
+                    suggestion="补充 Authorization、Content-Type 或其他接口必需请求头。",
+                )
+            )
+
     if document.business_rules.strip() and "业务规则" not in covered:
         issues.append(
             ApiQualityIssue(
@@ -153,15 +166,39 @@ def _coverage_issues(cases: list[ApiTestCase], document: ApiDocument) -> list[Ap
                 suggestion="补充接口调用后数据库记录新增、更新、状态变化或日志写入检查。",
             )
         )
+    elif document.db_checks.strip():
+        case_ids = [case.case_id for case in cases if case.case_type == "数据库校验" and not case.db_check.strip()]
+        if case_ids:
+            issues.append(
+                ApiQualityIssue(
+                    category="数据库校验",
+                    severity="警告",
+                    case_ids=case_ids,
+                    message="接口文档包含数据库校验，但数据库校验用例缺少 db_check 内容。",
+                    suggestion="把需要核对的数据表、字段、状态或日志写入到数据库校验列。",
+                )
+            )
 
-    weak_expected_case_ids = [case.case_id for case in cases if _is_weak_expected_result(case.expected_result)]
+    missing_extract_case_ids = [case.case_id for case in cases if _may_need_extract_vars(case) and not case.extract_vars.strip()]
+    if missing_extract_case_ids:
+        issues.append(
+            ApiQualityIssue(
+                category="变量提取",
+                severity="警告",
+                case_ids=missing_extract_case_ids,
+                message="部分用例可能需要变量提取但未填写。",
+                suggestion="如果后续接口依赖响应中的 id、token、编号等字段，可在变量提取列说明提取路径。",
+            )
+        )
+
+    weak_expected_case_ids = [case.case_id for case in cases if _is_weak_assertion(case.assertions)]
     if weak_expected_case_ids:
         issues.append(
             ApiQualityIssue(
                 category="响应断言",
                 severity="警告",
                 case_ids=weak_expected_case_ids,
-                message="部分用例预期结果过泛。",
+                message="部分用例断言点过泛。",
                 suggestion="避免只写“成功/失败/正常”，补充状态码、业务码、字段或数据变化。",
             )
         )
@@ -177,9 +214,10 @@ def _covered_categories(cases: list[ApiTestCase]) -> set[str]:
                 case.case_type,
                 case.steps,
                 case.expected_status,
-                case.expected_result,
+                case.assertions,
                 case.remark,
                 case.precondition,
+                case.db_check,
             ]
         )
         if "正常" in text or "合法请求" in text or case.expected_status == "200":
@@ -211,8 +249,13 @@ def _duplicate_case_ids(cases: list[ApiTestCase]) -> list[str]:
     return sorted(duplicates)
 
 
-def _is_weak_expected_result(expected_result: str) -> bool:
-    value = expected_result.strip()
+def _is_weak_assertion(assertion: str) -> bool:
+    value = assertion.strip()
     if not value:
         return False
     return value in {"成功", "失败", "正常", "接口成功", "接口失败", "返回成功", "返回失败"}
+
+
+def _may_need_extract_vars(case: ApiTestCase) -> bool:
+    text = f"{case.assertions} {case.remark} {case.case_type}"
+    return any(keyword in text for keyword in ["id", "ID", "编号", "token", "Token", "appointmentNo"])

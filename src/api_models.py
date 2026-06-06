@@ -13,12 +13,15 @@ class ApiTestCase:
     api_name: str
     method: str
     path: str
+    headers: str
     query_params: str
     request_body: str
     precondition: str
     steps: str
     expected_status: str
-    expected_result: str
+    assertions: str
+    db_check: str
+    extract_vars: str
     priority: str
     case_type: str
     remark: str
@@ -55,12 +58,15 @@ API_EXCEL_COLUMNS = [
     "接口名称",
     "请求方法",
     "接口路径",
+    "请求头",
     "请求参数",
     "请求体",
     "前置条件",
     "操作步骤",
     "预期状态码",
-    "预期结果",
+    "断言点",
+    "数据库校验",
+    "变量提取",
     "优先级",
     "用例类型",
     "备注",
@@ -73,12 +79,15 @@ API_COLUMN_TO_FIELD = {
     "接口名称": "api_name",
     "请求方法": "method",
     "接口路径": "path",
+    "请求头": "headers",
     "请求参数": "query_params",
     "请求体": "request_body",
     "前置条件": "precondition",
     "操作步骤": "steps",
     "预期状态码": "expected_status",
-    "预期结果": "expected_result",
+    "断言点": "assertions",
+    "数据库校验": "db_check",
+    "变量提取": "extract_vars",
     "优先级": "priority",
     "用例类型": "case_type",
     "备注": "remark",

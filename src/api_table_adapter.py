@@ -20,9 +20,9 @@ def rows_to_api_cases(rows: Any) -> list[ApiTestCase]:
     for index, row in enumerate(normalized_rows, start=1):
         api_name = _cell(row, "接口名称")
         path = _cell(row, "接口路径")
-        expected_result = _cell(row, "预期结果")
+        assertions = _cell(row, "断言点")
 
-        if not api_name and not path and not expected_result:
+        if not api_name and not path and not assertions:
             continue
 
         cases.append(
@@ -32,12 +32,15 @@ def rows_to_api_cases(rows: Any) -> list[ApiTestCase]:
                 api_name=api_name,
                 method=_cell(row, "请求方法") or "GET",
                 path=path,
+                headers=_cell(row, "请求头"),
                 query_params=_cell(row, "请求参数"),
                 request_body=_cell(row, "请求体"),
                 precondition=_cell(row, "前置条件"),
                 steps=normalize_steps(_cell(row, "操作步骤")),
                 expected_status=_cell(row, "预期状态码") or "200",
-                expected_result=expected_result,
+                assertions=assertions,
+                db_check=_cell(row, "数据库校验"),
+                extract_vars=_cell(row, "变量提取"),
                 priority=_cell(row, "优先级") or "P2",
                 case_type=_cell(row, "用例类型") or "接口测试",
                 remark=_cell(row, "备注"),
@@ -64,8 +67,8 @@ def find_api_case_warnings(cases: list[ApiTestCase]) -> list[str]:
             warnings.append(f"{case.case_id}：缺少接口路径。")
         if not case.expected_status:
             warnings.append(f"{case.case_id}：缺少预期状态码。")
-        if not case.expected_result:
-            warnings.append(f"{case.case_id}：缺少预期结果。")
+        if not case.assertions:
+            warnings.append(f"{case.case_id}：缺少断言点。")
 
     return warnings
 

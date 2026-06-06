@@ -13,12 +13,15 @@ def test_build_api_excel_contains_api_sheet_and_data():
         api_name="设备控制接口",
         method="POST",
         path="/api/devices/{deviceId}/control",
+        headers="Authorization: Bearer token",
         query_params="deviceId=10001",
         request_body='{"action": "open"}',
         precondition="已获取有效 token",
         steps="1. 构造请求\n2. 发送请求",
         expected_status="200",
-        expected_result="接口返回成功",
+        assertions="接口返回成功",
+        db_check="设备状态记录更新",
+        extract_vars="",
         priority="P1",
         case_type="接口测试",
         remark="示例",
@@ -35,7 +38,10 @@ def test_build_api_excel_contains_api_sheet_and_data():
     assert row[0] == "API-01-01"
     assert row[2] == "设备控制接口"
     assert row[3] == "POST"
-    assert row[9] == "200"
+    assert row[5] == "Authorization: Bearer token"
+    assert row[10] == "200"
+    assert row[11] == "接口返回成功"
+    assert row[12] == "设备状态记录更新"
 
 
 def test_build_api_excel_contains_quality_report_sheet():
@@ -45,12 +51,15 @@ def test_build_api_excel_contains_quality_report_sheet():
         api_name="设备控制接口",
         method="POST",
         path="/api/devices/{deviceId}/control",
+        headers="Authorization: Bearer token",
         query_params="deviceId=10001",
         request_body='{"action": "open"}',
         precondition="已获取有效 token",
         steps="1. 构造请求\n2. 发送请求",
         expected_status="200",
-        expected_result="成功",
+        assertions="成功",
+        db_check="",
+        extract_vars="",
         priority="P1",
         case_type="正常请求",
         remark="示例",

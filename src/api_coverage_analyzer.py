@@ -63,11 +63,12 @@ def _case_matches(case: ApiTestCase, coverage_name: str) -> bool:
             case.case_type,
             case.steps,
             case.expected_status,
-            case.expected_result,
+            case.assertions,
             case.remark,
             case.precondition,
             case.query_params,
             case.request_body,
+            case.db_check,
         ]
     )
     if coverage_name == "正常请求":

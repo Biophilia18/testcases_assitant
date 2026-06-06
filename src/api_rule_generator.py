@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from src.api_models import ApiDocument, ApiTestCase
+from src.api_param_parser import ApiParam, parse_api_params
 
 
 def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
     cases: list[ApiTestCase] = []
+    params = parse_api_params(document)
 
     _append_case(
         cases,
@@ -15,51 +17,67 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
         precondition=_valid_precondition(document),
         steps=_steps(document, "构造合法请求", "发送请求", "查看状态码、响应体和业务数据"),
         expected_status="200",
-        expected_result=_success_expected_result(document),
+        assertions=_success_assertions(document),
+        db_check=document.db_checks.strip(),
+        extract_vars=_extract_vars(document),
         priority="P1",
         remark="基础正向用例。需要结合真实响应字段补充精确断言。",
     )
 
-    _append_case(
-        cases,
-        document,
-        case_type="参数校验",
-        query_params=_invalid_params(document, "必填参数置为空"),
-        request_body=_invalid_body(document, "必填字段置为空"),
-        precondition=_valid_precondition(document),
-        steps=_steps(document, "将必填参数或请求体字段置为空", "发送请求", "查看错误响应"),
-        expected_status="400",
-        expected_result="接口返回明确参数错误信息；不产生新增、修改或状态变更等业务数据。",
-        priority="P1",
-        remark="必填参数为空。若接口文档没有标明必填字段，需要人工确认。",
-    )
-
-    if _has_request_data(document):
+    required_params = [param for param in params if param.required]
+    if required_params:
+        for param in required_params:
+            _append_param_case(
+                cases,
+                document,
+                param,
+                case_type="参数校验",
+                action="置为空",
+                expected_status="400",
+                assertions=f"接口返回{param.name}不能为空、必填或参数缺失相关错误信息；不产生业务数据变更。",
+                remark=f"必填参数为空：{param.name}",
+            )
+    else:
         _append_case(
             cases,
             document,
             case_type="参数校验",
-            query_params=_invalid_params(document, "参数类型改为非法类型"),
-            request_body=_invalid_body(document, "字段类型改为非法类型"),
+            query_params=_invalid_params(document, "选择一个关键参数置为空"),
+            request_body=_invalid_body(document, "选择一个关键字段置为空"),
             precondition=_valid_precondition(document),
-            steps=_steps(document, "将参数或请求体字段改为错误类型", "发送请求", "查看参数校验结果"),
+            steps=_steps(document, "将关键参数或请求体字段置为空", "发送请求", "查看错误响应"),
             expected_status="400",
-            expected_result="接口拒绝错误类型参数，返回明确错误码和错误信息。",
+            assertions="接口返回明确参数错误信息；不产生新增、修改或状态变更等业务数据。",
+            db_check="确认未产生异常业务数据。",
+            extract_vars="",
             priority="P1",
-            remark="参数类型错误。建议补充具体字段、类型和非法值。",
+            remark="接口文档未标明必填参数，需要人工确认关键参数。",
         )
-        _append_case(
+
+    typed_params = [param for param in params if param.param_type]
+    for param in typed_params:
+        _append_param_case(
             cases,
             document,
-            case_type="边界值",
-            query_params=_invalid_params(document, "使用边界值或超长值"),
-            request_body=_invalid_body(document, "使用边界值或超长值"),
-            precondition=_valid_precondition(document),
-            steps=_steps(document, "准备边界值、超长值或超出范围的字段", "发送请求", "查看边界处理结果"),
+            param,
+            case_type="参数校验",
+            action=f"改为错误类型（期望类型：{param.param_type}）",
             expected_status="400",
-            expected_result="接口按字段规则处理边界值；非法边界值返回明确错误信息，合法边界值正常处理。",
-            priority="P2",
-            remark="参数边界值。需要结合字段长度、枚举、数值范围细化。",
+            assertions=f"接口拒绝{param.name}错误类型参数，返回明确错误码和错误信息。",
+            remark=f"参数类型错误：{param.name}，期望类型 {param.param_type}",
+        )
+
+    rule_params = [param for param in params if _has_boundary_rule(param)]
+    for param in rule_params:
+        _append_param_case(
+            cases,
+            document,
+            param,
+            case_type="边界值",
+            action=f"设置为边界或非法值（规则：{param.rule}）",
+            expected_status="400",
+            assertions=f"接口按{param.name}字段规则处理边界/非法值；非法值返回明确错误信息。",
+            remark=f"边界/非法值：{param.name}。规则：{param.rule}",
         )
 
     _append_case(
@@ -71,7 +89,9 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
         precondition="不传鉴权信息或移除 Token。",
         steps=_steps(document, "移除鉴权信息", "发送请求", "查看鉴权失败响应"),
         expected_status="401",
-        expected_result="接口拒绝访问，返回未鉴权提示，不泄露敏感数据。",
+        assertions="接口拒绝访问，返回未鉴权提示，不泄露敏感数据。",
+        db_check="确认未产生业务数据变更。",
+        extract_vars="",
         priority="P1",
         remark=_auth_remark(document, "未鉴权或 Token 缺失。"),
     )
@@ -86,7 +106,9 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
             precondition=f"准备已登录但无权限的账号或低权限 Token。鉴权方式：{document.auth.strip()}",
             steps=_steps(document, "使用无权限账号或低权限 Token 构造请求", "发送请求", "查看权限校验结果"),
             expected_status="403",
-            expected_result="接口拒绝无权限操作，返回权限不足提示，不产生业务数据变更。",
+            assertions="接口拒绝无权限操作，返回权限不足提示，不产生业务数据变更。",
+            db_check="确认未产生业务数据变更。",
+            extract_vars="",
             priority="P1",
             remark="权限不足。需要结合角色权限矩阵补充具体账号。",
         )
@@ -101,7 +123,9 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
             precondition=f"准备不满足业务规则的数据。\n业务规则：{document.business_rules.strip()}",
             steps=_steps(document, "构造不满足业务规则的请求数据", "发送请求", "查看业务规则拦截结果"),
             expected_status="400",
-            expected_result="接口按业务规则拒绝请求，返回明确失败原因，不产生异常业务数据。",
+            assertions="接口按业务规则拒绝请求，返回明确失败原因，不产生异常业务数据。",
+            db_check="确认数据库未写入异常业务记录。",
+            extract_vars="",
             priority="P1",
             remark="业务规则不满足。需要按每条规则拆分更细用例。",
         )
@@ -115,7 +139,9 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
         precondition=_valid_precondition(document),
         steps=_steps(document, "使用同一请求数据连续发送两次", "对比两次响应", "检查业务数据是否重复产生"),
         expected_status="200",
-        expected_result="接口重复请求处理符合幂等预期；不会重复创建、重复扣减或产生脏数据。",
+        assertions="接口重复请求处理符合幂等预期；不会重复创建、重复扣减或产生脏数据。",
+        db_check="确认数据库没有重复记录或异常状态变更。",
+        extract_vars="",
         priority="P2",
         remark="重复请求/幂等性。若接口本身允许重复提交，需要调整预期。",
     )
@@ -130,7 +156,9 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
             precondition=_valid_precondition(document),
             steps=_steps(document, "发送合法请求", "对照响应示例检查字段", "确认字段类型和值域"),
             expected_status="200",
-            expected_result=f"响应字段、字段类型、业务码和消息内容符合接口文档。\n响应示例：{document.response_example.strip()}",
+            assertions=f"响应字段、字段类型、业务码和消息内容符合接口文档。\n响应示例：{document.response_example.strip()}",
+            db_check=document.db_checks.strip(),
+            extract_vars=_extract_vars(document),
             priority="P2",
             remark="响应字段断言。建议补充必须返回字段和字段类型。",
         )
@@ -145,12 +173,41 @@ def generate_api_cases(document: ApiDocument) -> list[ApiTestCase]:
             precondition=_valid_precondition(document),
             steps=_steps(document, "发送合法请求", "查询相关数据库记录", "核对数据库变更与接口响应"),
             expected_status="200",
-            expected_result=f"数据库记录与接口处理结果一致。\n数据库校验：{document.db_checks.strip()}",
+            assertions="接口响应与数据库变更一致。",
+            db_check=document.db_checks.strip(),
+            extract_vars=_extract_vars(document),
             priority="P2",
             remark="数据库校验。需要测试环境提供可核查的数据表或查询方式。",
         )
 
     return cases
+
+
+def _append_param_case(
+    cases: list[ApiTestCase],
+    document: ApiDocument,
+    param: ApiParam,
+    case_type: str,
+    action: str,
+    expected_status: str,
+    assertions: str,
+    remark: str,
+) -> None:
+    _append_case(
+        cases,
+        document,
+        case_type=case_type,
+        query_params=_param_case_params(document, param, action),
+        request_body=_param_case_body(document, param, action),
+        precondition=_valid_precondition(document),
+        steps=_steps(document, f"将{param.source}参数 {param.name} {action}", "发送请求", "查看参数校验结果"),
+        expected_status=expected_status,
+        assertions=assertions,
+        db_check="确认未产生异常业务数据。",
+        extract_vars="",
+        priority="P1",
+        remark=remark,
+    )
 
 
 def _append_case(
@@ -162,7 +219,9 @@ def _append_case(
     precondition: str,
     steps: str,
     expected_status: str,
-    expected_result: str,
+    assertions: str,
+    db_check: str,
+    extract_vars: str,
     priority: str,
     remark: str,
 ) -> None:
@@ -174,12 +233,15 @@ def _append_case(
             api_name=document.api_name.strip() or "示例接口",
             method=document.method.strip() or "POST",
             path=document.path.strip() or "/api/example",
+            headers=document.headers.strip(),
             query_params=query_params,
             request_body=request_body,
             precondition=precondition,
             steps=steps,
             expected_status=expected_status,
-            expected_result=expected_result,
+            assertions=assertions,
+            db_check=db_check,
+            extract_vars=extract_vars,
             priority=priority,
             case_type=case_type,
             remark=remark,
@@ -198,8 +260,6 @@ def _valid_precondition(document: ApiDocument) -> str:
         parts.append(f"准备有效鉴权信息：{document.auth.strip()}")
     else:
         parts.append("准备接口可访问的测试环境")
-    if document.headers.strip():
-        parts.append(f"请求头：{document.headers.strip()}")
     return "\n".join(parts)
 
 
@@ -223,10 +283,31 @@ def _invalid_body(document: ApiDocument, note: str) -> str:
     return ""
 
 
-def _success_expected_result(document: ApiDocument) -> str:
+def _param_case_params(document: ApiDocument, param: ApiParam, action: str) -> str:
+    if param.source == "query":
+        return f"{_valid_params(document)}\n测试处理：{param.name} {action}"
+    return _valid_params(document)
+
+
+def _param_case_body(document: ApiDocument, param: ApiParam, action: str) -> str:
+    if param.source == "body":
+        return f"{_valid_body(document)}\n测试处理：{param.name} {action}"
+    return _valid_body(document)
+
+
+def _success_assertions(document: ApiDocument) -> str:
     if document.response_example.strip():
-        return f"接口返回成功，响应内容符合接口文档。\n响应示例：{document.response_example.strip()}"
+        return f"接口返回成功，状态码、业务码和响应字段符合接口文档。\n响应示例：{document.response_example.strip()}"
     return "接口返回成功；状态码、业务码、响应字段和业务数据符合接口文档。"
+
+
+def _extract_vars(document: ApiDocument) -> str:
+    response = document.response_example
+    hints = []
+    for keyword in ["id", "ID", "token", "Token", "appointmentNo", "orderNo"]:
+        if keyword in response:
+            hints.append(f"提取 {keyword} 供后续接口使用")
+    return "\n".join(hints)
 
 
 def _auth_remark(document: ApiDocument, fallback: str) -> str:
@@ -235,5 +316,6 @@ def _auth_remark(document: ApiDocument, fallback: str) -> str:
     return f"{fallback}接口文档未说明鉴权方式，需要人工确认是否适用。"
 
 
-def _has_request_data(document: ApiDocument) -> bool:
-    return bool(document.params.strip() or document.body.strip())
+def _has_boundary_rule(param: ApiParam) -> bool:
+    text = f"{param.rule} {param.name}"
+    return any(keyword in text for keyword in ["长度", "范围", "大于", "小于", "枚举", "允许值", "取值", "格式", "手机号", "不能早于", "不能晚于"])
