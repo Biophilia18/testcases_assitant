@@ -3,18 +3,21 @@
 import streamlit as st
 
 from src.api.coverage_analyzer import API_COVERAGE_ITEMS, api_coverage_matrix_to_rows, build_api_coverage_matrix
+from src.api.api_auto_exporter import build_api_auto_preview_rows, build_api_auto_yaml
 from src.api.design_plan import (
     API_GENERATION_STRATEGIES,
     build_api_design_plan,
     business_rule_risks_to_rows,
     design_plan_summary_rows,
     param_risks_to_rows,
+    plan_items_to_rows,
+    rows_to_plan_items,
 )
 from src.api.document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
 from src.api.exporter import build_api_excel
 from src.api.models import ApiDocument, ApiTestCase
 from src.api.quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
-from src.api.rule_generator import generate_api_cases
+from src.api.rule_generator import build_api_plan_trace_rows, generate_api_cases
 from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.document_loader import load_requirement_document
 
@@ -194,6 +197,47 @@ def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
         included_business_rules=included_business_rules if business_rows else None,
     )
 
+    st.markdown("**参数风险分析**")
+    if plan.param_risks:
+        edited_param_rows = st.data_editor(
+            param_risks_to_rows(plan.param_risks),
+            use_container_width=True,
+            hide_index=True,
+            disabled=["参数名", "参数来源", "是否必填", "参数类型", "识别到的规则", "风险类型", "建议测试点"],
+            key="api_param_risk_plan_editor",
+        )
+        included_param_names = _included_param_names_from_rows(edited_param_rows)
+    else:
+        st.info("未识别到参数。可以在 Step 2 的“请求参数 / 字段说明”或“请求体”中补充。")
+        included_param_names = []
+
+    plan = build_api_design_plan(
+        document,
+        coverage_types=coverage_types,
+        strategy=strategy,
+        included_business_rules=included_business_rules if business_rows else None,
+        included_param_names=included_param_names if plan.param_risks else None,
+    )
+
+    st.markdown("**计划生成项**")
+    plan_rows = plan_items_to_rows(plan.plan_items)
+    if plan_rows:
+        edited_plan_rows = st.data_editor(
+            plan_rows,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["计划ID", "覆盖项", "来源类型", "来源名称", "风险类型", "建议测试点", "预计用例数"],
+            key="api_plan_item_editor",
+        )
+        plan_items = rows_to_plan_items(edited_plan_rows)
+    else:
+        st.info("当前未形成计划生成项。请检查覆盖项选择或补充接口文档信息。")
+        plan_items = []
+
+    estimated_count = sum(item.estimated_count for item in plan_items if item.included)
+    plan.estimated_case_count = estimated_count
+    plan.planned_case_types = _planned_case_types_from_items(plan_items)
+
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     metric_col1.metric("预计用例数", plan.estimated_case_count)
     metric_col2.metric("参数风险", len(plan.param_risks))
@@ -203,12 +247,6 @@ def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
     st.markdown("**计划摘要**")
     st.dataframe(design_plan_summary_rows(plan), use_container_width=True, hide_index=True)
 
-    st.markdown("**参数风险分析**")
-    if plan.param_risks:
-        st.dataframe(param_risks_to_rows(plan.param_risks), use_container_width=True, hide_index=True)
-    else:
-        st.info("未识别到参数。可以在 Step 2 的“请求参数 / 字段说明”或“请求体”中补充。")
-
     if plan.db_checks:
         with st.expander("数据库校验识别", expanded=False):
             st.dataframe([{"数据库校验": item} for item in plan.db_checks], use_container_width=True, hide_index=True)
@@ -217,6 +255,7 @@ def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
         "coverage_types": plan.coverage_types,
         "strategy": plan.strategy,
         "business_rules": [rule.content for rule in plan.business_rule_risks if rule.included],
+        "plan_items": plan_items,
     }
 
 
@@ -230,12 +269,15 @@ def _render_api_step_generate(document: ApiDocument, has_document_text: bool, de
         _render_api_case_summary(current_cases)
 
     if st.button("生成接口测试用例", type="primary"):
+        plan_items = list(design_options.get("plan_items", []))
         st.session_state["api_cases"] = generate_api_cases(
             document,
             coverage_types=list(design_options.get("coverage_types", [])),
             strategy=str(design_options.get("strategy", "标准")),
             business_rules=list(design_options.get("business_rules", [])),
+            plan_items=plan_items,
         )
+        st.session_state["api_last_plan_items"] = plan_items
         st.session_state["api_export_filename"] = _build_api_export_filename(document.project_name, document.module)
         st.session_state["api_generation_revision"] = st.session_state.get("api_generation_revision", 0) + 1
         st.success("已生成接口测试用例，可继续编辑并检查质量。")
@@ -250,6 +292,7 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
 
     _render_api_review_summary(api_cases, document)
     _render_api_case_groups(api_cases)
+    _render_api_plan_trace(api_cases)
     edited_rows = st.data_editor(
         api_cases_to_rows(api_cases),
         use_container_width=True,
@@ -276,9 +319,9 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
 
 
 def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> None:
-    st.subheader("Step 6：导出接口 Excel")
+    st.subheader("Step 6：保存与导出")
     if not cases:
-        st.info("生成接口测试用例后，可导出包含接口测试用例和接口质量报告的 Excel。")
+        st.info("生成接口测试用例后，可导出 Excel，也可预览并下载 api_auto YAML。")
 
     filename = st.text_input(
         "接口 Excel 文件名",
@@ -292,6 +335,23 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         disabled=not cases,
     )
+
+    with st.expander("api_auto YAML 导出预览", expanded=bool(cases)):
+        if not cases:
+            st.info("生成接口测试用例后，这里会展示可供 api_auto 使用的 YAML 预览。")
+            return
+
+        st.caption("YAML 会按 api_auto 当前结构生成 feature/story/title/request/extract/validate。导出后仍建议结合真实环境补充 token、测试数据和复杂断言。")
+        st.dataframe(build_api_auto_preview_rows(cases), use_container_width=True, hide_index=True)
+        yaml_text = build_api_auto_yaml(cases, document)
+        st.code(yaml_text, language="yaml")
+        yaml_filename = filename.rsplit(".", 1)[0] + ".yaml" if filename else "api_auto_cases.yaml"
+        st.download_button(
+            "下载 api_auto YAML",
+            data=yaml_text.encode("utf-8"),
+            file_name=yaml_filename,
+            mime="text/yaml",
+        )
 
 
 def _render_api_progress_summary() -> None:
@@ -386,6 +446,15 @@ def _render_api_case_groups(cases: list[ApiTestCase]) -> None:
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
+def _render_api_plan_trace(cases: list[ApiTestCase]) -> None:
+    plan_items = st.session_state.get("api_last_plan_items") or []
+    if not plan_items:
+        return
+
+    with st.expander("测试计划覆盖追踪", expanded=True):
+        st.dataframe(build_api_plan_trace_rows(plan_items, cases), use_container_width=True, hide_index=True)
+
+
 def _api_case_group_name(case: ApiTestCase) -> str:
     text = f"{case.case_type} {case.remark} {case.steps} {case.assertions}"
     if any(keyword in text for keyword in ["正常请求", "合法请求"]):
@@ -413,6 +482,24 @@ def _included_business_rules_from_rows(rows) -> list[str]:
         for row in rows
         if row.get("是否参与生成") and str(row.get("规则内容", "")).strip()
     ]
+
+
+def _included_param_names_from_rows(rows) -> list[str]:
+    if hasattr(rows, "to_dict"):
+        rows = rows.to_dict("records")
+    return [
+        str(row.get("参数名", "")).strip()
+        for row in rows
+        if row.get("是否参与生成") and str(row.get("参数名", "")).strip()
+    ]
+
+
+def _planned_case_types_from_items(plan_items) -> list[str]:
+    planned = []
+    for item in plan_items:
+        if item.included and item.coverage_type not in planned:
+            planned.append(item.coverage_type)
+    return planned
 
 
 def _apply_uploaded_api_document(uploaded_file) -> None:

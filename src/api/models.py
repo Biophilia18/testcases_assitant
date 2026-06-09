@@ -9,6 +9,7 @@ class ApiTestCase:
     __test__: ClassVar[bool] = False
 
     case_id: str
+    case_title: str
     module: str
     api_name: str
     method: str
@@ -54,6 +55,7 @@ class ApiDocument:
 
 API_EXCEL_COLUMNS = [
     "用例编号",
+    "用例标题",
     "模块",
     "接口名称",
     "请求方法",
@@ -75,6 +77,7 @@ API_EXCEL_COLUMNS = [
 
 API_COLUMN_TO_FIELD = {
     "用例编号": "case_id",
+    "用例标题": "case_title",
     "模块": "module",
     "接口名称": "api_name",
     "请求方法": "method",

@@ -61,6 +61,7 @@ def _style_sheet(sheet) -> None:
 
     width_by_column = {
         "用例编号": 14,
+        "用例标题": 30,
         "模块": 16,
         "接口名称": 24,
         "请求方法": 12,

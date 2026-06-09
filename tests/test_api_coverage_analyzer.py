@@ -6,6 +6,7 @@ from src.api.rule_generator import generate_api_cases
 def _api_case(case_id: str, case_type: str, expected_status: str = "200", remark: str = "") -> ApiTestCase:
     return ApiTestCase(
         case_id=case_id,
+        case_title=f"{case_type}-设备控制接口",
         module="设备控制",
         api_name="设备控制接口",
         method="POST",

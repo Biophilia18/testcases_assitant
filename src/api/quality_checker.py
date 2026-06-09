@@ -63,6 +63,7 @@ def api_quality_summary(cases: list[ApiTestCase], issues: list[ApiQualityIssue])
 
 def _required_field_issues(cases: list[ApiTestCase]) -> list[ApiQualityIssue]:
     checks = [
+        ("用例标题", lambda case: bool(case.case_title.strip()), "补充清晰的用例标题，例如“必填参数为空-deviceId”。"),
         ("接口名称", lambda case: bool(case.api_name.strip()), "补充接口名称，避免导出后无法定位接口。"),
         ("请求方法", lambda case: bool(case.method.strip()), "补充 GET/POST/PUT/PATCH/DELETE 等请求方法。"),
         ("接口路径", lambda case: bool(case.path.strip()), "补充接口路径，例如 /api/orders。"),

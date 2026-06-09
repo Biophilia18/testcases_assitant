@@ -1,5 +1,11 @@
-from src.api.design_plan import analyze_business_rule_risks, analyze_param_risks, build_api_design_plan
+from src.api.design_plan import (
+    analyze_business_rule_risks,
+    analyze_param_risks,
+    build_api_design_plan,
+    build_api_plan_items,
+)
 from src.api.models import ApiDocument
+from src.api.rule_generator import build_api_plan_trace_rows, generate_api_cases
 
 
 def _document() -> ApiDocument:
@@ -61,3 +67,50 @@ def test_build_api_design_plan_allows_empty_coverage_selection() -> None:
     assert plan.coverage_types == []
     assert plan.planned_case_types == []
     assert plan.estimated_case_count == 0
+
+
+def test_build_api_plan_items_creates_param_plan_items() -> None:
+    items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="完整")
+
+    assert any(item.source_type == "param" and item.source_name == "deviceId" for item in items)
+    assert any(item.risk_type == "必填缺失" for item in items)
+    assert any(item.risk_type == "非法枚举" and item.source_name == "action" for item in items)
+
+
+def test_strategy_changes_plan_item_count() -> None:
+    compact_items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="精简")
+    standard_items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="标准")
+    full_items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="完整")
+
+    assert len(compact_items) < len(standard_items) <= len(full_items)
+
+
+def test_estimated_count_matches_actual_generated_count() -> None:
+    plan = build_api_design_plan(_document(), strategy="标准")
+    cases = generate_api_cases(_document(), plan_items=plan.plan_items)
+
+    assert plan.estimated_case_count == len(cases)
+
+
+def test_excluded_business_rule_does_not_generate_case() -> None:
+    plan_items = build_api_plan_items(
+        _document(),
+        coverage_types=["业务规则"],
+        strategy="完整",
+        included_business_rules=["设备在线才允许控制"],
+    )
+    cases = generate_api_cases(_document(), plan_items=plan_items)
+
+    assert any("设备在线才允许控制" in case.remark for case in cases)
+    assert not any("用户只能控制自己的设备" in case.remark for case in cases)
+
+
+def test_generated_cases_can_be_traced_by_plan_id() -> None:
+    plan = build_api_design_plan(_document(), coverage_types=["正常请求", "参数校验"], strategy="精简")
+    cases = generate_api_cases(_document(), plan_items=plan.plan_items)
+    trace_rows = build_api_plan_trace_rows(plan.plan_items, cases)
+
+    included_rows = [row for row in trace_rows if row["是否参与"] == "是"]
+    assert included_rows
+    assert all(row["是否生成"] == "是" for row in included_rows)
+    assert all(row["对应用例编号"] != "-" for row in included_rows)

@@ -9,6 +9,7 @@ from src.api.models import API_EXCEL_COLUMNS, ApiDocument, ApiTestCase
 def test_build_api_excel_contains_api_sheet_and_data():
     case = ApiTestCase(
         case_id="API-01-01",
+        case_title="正常请求-设备控制成功",
         module="设备控制",
         api_name="设备控制接口",
         method="POST",
@@ -36,17 +37,19 @@ def test_build_api_excel_contains_api_sheet_and_data():
 
     assert headers == API_EXCEL_COLUMNS
     assert row[0] == "API-01-01"
-    assert row[2] == "设备控制接口"
-    assert row[3] == "POST"
-    assert row[5] == "Authorization: Bearer token"
-    assert row[10] == "200"
-    assert row[11] == "接口返回成功"
-    assert row[12] == "设备状态记录更新"
+    assert row[1] == "正常请求-设备控制成功"
+    assert row[3] == "设备控制接口"
+    assert row[4] == "POST"
+    assert row[6] == "Authorization: Bearer token"
+    assert row[11] == "200"
+    assert row[12] == "接口返回成功"
+    assert row[13] == "设备状态记录更新"
 
 
 def test_build_api_excel_contains_quality_report_sheet():
     case = ApiTestCase(
         case_id="API-01-01",
+        case_title="正常请求-设备控制成功",
         module="设备控制",
         api_name="设备控制接口",
         method="POST",

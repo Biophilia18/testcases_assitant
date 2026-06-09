@@ -5,6 +5,7 @@ from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, row
 def _api_case() -> ApiTestCase:
     return ApiTestCase(
         case_id="API-01-01",
+        case_title="正常请求-设备控制成功",
         module="设备控制",
         api_name="设备控制接口",
         method="POST",
@@ -28,6 +29,7 @@ def test_api_cases_to_rows_contains_api_columns():
     rows = api_cases_to_rows([_api_case()])
 
     assert rows[0]["用例编号"] == "API-01-01"
+    assert rows[0]["用例标题"] == "正常请求-设备控制成功"
     assert rows[0]["接口名称"] == "设备控制接口"
     assert rows[0]["请求方法"] == "POST"
     assert rows[0]["接口路径"] == "/api/devices/{deviceId}/control"
@@ -53,6 +55,7 @@ def test_rows_to_api_cases_converts_rows_and_defaults_fields():
     cases = rows_to_api_cases(rows)
 
     assert cases[0].case_id == "API-EDIT-001"
+    assert cases[0].case_title == "接口测试-设备查询接口"
     assert cases[0].method == "GET"
     assert cases[0].expected_status == "200"
     assert cases[0].steps == "1. 发送请求\n2. 查看响应"
@@ -64,10 +67,12 @@ def test_rows_to_api_cases_converts_rows_and_defaults_fields():
 
 def test_find_api_case_warnings_reports_missing_required_fields():
     case = _api_case()
+    case.case_title = ""
     case.api_name = ""
     case.path = ""
 
     warnings = find_api_case_warnings([case])
 
+    assert any("缺少用例标题" in warning for warning in warnings)
     assert any("缺少接口名称" in warning for warning in warnings)
     assert any("缺少接口路径" in warning for warning in warnings)

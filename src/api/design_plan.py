@@ -30,6 +30,18 @@ class ApiBusinessRuleRisk:
 
 
 @dataclass
+class ApiPlanItem:
+    plan_id: str
+    coverage_type: str
+    source_type: str
+    source_name: str
+    risk_type: str
+    suggested_test_point: str
+    estimated_count: int
+    included: bool
+
+
+@dataclass
 class ApiDesignPlan:
     param_risks: list[ApiParamRisk]
     business_rule_risks: list[ApiBusinessRuleRisk]
@@ -38,6 +50,7 @@ class ApiDesignPlan:
     estimated_case_count: int
     coverage_types: list[str]
     strategy: str
+    plan_items: list[ApiPlanItem]
 
 
 def build_api_design_plan(
@@ -45,14 +58,22 @@ def build_api_design_plan(
     coverage_types: list[str] | None = None,
     strategy: str = "标准",
     included_business_rules: list[str] | None = None,
+    included_param_names: list[str] | None = None,
 ) -> ApiDesignPlan:
     selected_coverage = normalize_api_coverage_types(coverage_types)
     normalized_strategy = normalize_api_strategy(strategy)
     param_risks = analyze_param_risks(document)
     business_rule_risks = analyze_business_rule_risks(document, included_business_rules)
     db_checks = split_api_text_items(document.db_checks)
-    planned_case_types = _planned_case_types(document, param_risks, business_rule_risks, db_checks, selected_coverage)
-    estimated_case_count = estimate_api_case_count(document, selected_coverage, normalized_strategy, included_business_rules)
+    plan_items = build_api_plan_items(
+        document,
+        coverage_types=selected_coverage,
+        strategy=normalized_strategy,
+        included_business_rules=included_business_rules,
+        included_param_names=included_param_names,
+    )
+    planned_case_types = _planned_case_types(plan_items)
+    estimated_case_count = sum(item.estimated_count for item in plan_items if item.included)
     return ApiDesignPlan(
         param_risks=param_risks,
         business_rule_risks=business_rule_risks,
@@ -61,7 +82,104 @@ def build_api_design_plan(
         estimated_case_count=estimated_case_count,
         coverage_types=selected_coverage,
         strategy=normalized_strategy,
+        plan_items=plan_items,
     )
+
+
+def build_api_plan_items(
+    document: ApiDocument,
+    coverage_types: list[str] | None = None,
+    strategy: str = "标准",
+    included_business_rules: list[str] | None = None,
+    included_param_names: list[str] | None = None,
+) -> list[ApiPlanItem]:
+    selected_coverage = set(normalize_api_coverage_types(coverage_types))
+    normalized_strategy = normalize_api_strategy(strategy)
+    included_rules = _included_set(included_business_rules)
+    included_params = _included_set(included_param_names)
+    param_risks = analyze_param_risks(document)
+    business_rule_risks = analyze_business_rule_risks(document, included_business_rules)
+    db_checks = split_api_text_items(document.db_checks)
+
+    items: list[ApiPlanItem] = []
+    if "正常请求" in selected_coverage:
+        items.append(_fixed_item("PLAN-FIX-001", "正常请求", "基础正向", "主流程", "合法请求验证"))
+
+    if "参数校验" in selected_coverage:
+        param_points = _select_param_plan_points(_param_plan_points(param_risks), normalized_strategy)
+        for index, (risk, risk_type, test_point) in enumerate(param_points, start=1):
+            included = not included_params or risk.param_name in included_params
+            items.append(
+                ApiPlanItem(
+                    plan_id=f"PLAN-PARAM-{index:03d}",
+                    coverage_type="参数校验",
+                    source_type="param",
+                    source_name=risk.param_name,
+                    risk_type=risk_type,
+                    suggested_test_point=test_point,
+                    estimated_count=1,
+                    included=included,
+                )
+            )
+        if not param_risks:
+            items.append(
+                ApiPlanItem(
+                    plan_id="PLAN-PARAM-001",
+                    coverage_type="参数校验",
+                    source_type="fixed",
+                    source_name="关键参数",
+                    risk_type="参数缺失",
+                    suggested_test_point="选择一个关键参数置为空，验证参数校验。",
+                    estimated_count=1,
+                    included=True,
+                )
+            )
+
+    if "鉴权校验" in selected_coverage:
+        items.append(_fixed_item("PLAN-AUTH-001", "鉴权校验", "鉴权信息", "未鉴权", "移除 Token 或鉴权信息"))
+
+    if "权限校验" in selected_coverage and document.auth.strip():
+        items.append(_fixed_item("PLAN-PERM-001", "权限校验", "权限角色", "权限不足", "使用低权限账号或非授权资源"))
+
+    if "业务规则" in selected_coverage:
+        selected_rule_risks = [risk for risk in business_rule_risks if risk.included]
+        selected_rule_risks = _select_business_risks(selected_rule_risks, normalized_strategy)
+        for index, risk in enumerate(selected_rule_risks, start=1):
+            included = not included_rules or risk.content in included_rules
+            items.append(
+                ApiPlanItem(
+                    plan_id=f"PLAN-BIZ-{index:03d}",
+                    coverage_type="业务规则",
+                    source_type="business_rule",
+                    source_name=risk.content,
+                    risk_type=risk.risk_type,
+                    suggested_test_point=risk.suggested_test_point,
+                    estimated_count=1,
+                    included=included,
+                )
+            )
+
+    if "幂等校验" in selected_coverage:
+        items.append(_fixed_item("PLAN-IDEMP-001", "幂等校验", "重复请求", "重复提交", "连续提交同一请求并检查数据不重复"))
+
+    if "响应断言" in selected_coverage and document.response_example.strip():
+        items.append(_fixed_item("PLAN-RESP-001", "响应断言", "响应示例", "字段断言", "校验状态码、业务码、必返字段和字段类型", source_type="response"))
+
+    if "数据库校验" in selected_coverage:
+        for index, db_check in enumerate(db_checks, start=1):
+            items.append(
+                ApiPlanItem(
+                    plan_id=f"PLAN-DB-{index:03d}",
+                    coverage_type="数据库校验",
+                    source_type="db_check",
+                    source_name=db_check,
+                    risk_type="数据一致性",
+                    suggested_test_point=f"检查数据库变化：{db_check}",
+                    estimated_count=1,
+                    included=True,
+                )
+            )
+    return items
 
 
 def analyze_param_risks(document: ApiDocument) -> list[ApiParamRisk]:
@@ -90,39 +208,25 @@ def estimate_api_case_count(
     coverage_types: list[str] | None = None,
     strategy: str = "标准",
     included_business_rules: list[str] | None = None,
+    included_param_names: list[str] | None = None,
 ) -> int:
-    selected_coverage = normalize_api_coverage_types(coverage_types)
-    normalized_strategy = normalize_api_strategy(strategy)
-    params = parse_api_params(document)
-    business_rules = [
-        rule for rule in analyze_business_rule_risks(document, included_business_rules) if rule.included
-    ]
-    count = 0
-
-    if "正常请求" in selected_coverage:
-        count += 1
-    if "参数校验" in selected_coverage:
-        count += _estimate_param_case_count(params, normalized_strategy)
-    if "鉴权校验" in selected_coverage:
-        count += 1
-    if "权限校验" in selected_coverage and document.auth.strip():
-        count += 1
-    if "业务规则" in selected_coverage and business_rules:
-        count += len(business_rules) if normalized_strategy == "完整" else 1
-    if "幂等校验" in selected_coverage:
-        count += 1
-    if "响应断言" in selected_coverage and document.response_example.strip():
-        count += 1
-    if "数据库校验" in selected_coverage and document.db_checks.strip():
-        count += 1
-    return count
+    return sum(
+        item.estimated_count
+        for item in build_api_plan_items(
+            document,
+            coverage_types=coverage_types,
+            strategy=strategy,
+            included_business_rules=included_business_rules,
+            included_param_names=included_param_names,
+        )
+        if item.included
+    )
 
 
 def normalize_api_coverage_types(coverage_types: list[str] | None) -> list[str]:
     if coverage_types is None:
         return list(API_COVERAGE_ITEMS)
-    selected = [item for item in API_COVERAGE_ITEMS if item in set(coverage_types)]
-    return selected
+    return [item for item in API_COVERAGE_ITEMS if item in set(coverage_types)]
 
 
 def normalize_api_strategy(strategy: str) -> str:
@@ -143,7 +247,7 @@ def split_api_text_items(text: str) -> list[str]:
     return _unique(items)
 
 
-def param_risks_to_rows(risks: list[ApiParamRisk]) -> list[dict[str, str]]:
+def param_risks_to_rows(risks: list[ApiParamRisk]) -> list[dict[str, str | bool]]:
     return [
         {
             "参数名": risk.param_name,
@@ -153,6 +257,7 @@ def param_risks_to_rows(risks: list[ApiParamRisk]) -> list[dict[str, str]]:
             "识别到的规则": risk.rule or "-",
             "风险类型": risk.risk_type,
             "建议测试点": risk.suggested_test_point,
+            "是否参与生成": True,
         }
         for risk in risks
     ]
@@ -170,16 +275,74 @@ def business_rule_risks_to_rows(risks: list[ApiBusinessRuleRisk]) -> list[dict[s
     ]
 
 
+def plan_items_to_rows(items: list[ApiPlanItem]) -> list[dict[str, str | int | bool]]:
+    return [
+        {
+            "计划ID": item.plan_id,
+            "覆盖项": item.coverage_type,
+            "来源类型": item.source_type,
+            "来源名称": item.source_name,
+            "风险类型": item.risk_type,
+            "建议测试点": item.suggested_test_point,
+            "预计用例数": item.estimated_count,
+            "是否参与生成": item.included,
+        }
+        for item in items
+    ]
+
+
+def rows_to_plan_items(rows) -> list[ApiPlanItem]:
+    if hasattr(rows, "to_dict"):
+        rows = rows.to_dict("records")
+    items = []
+    for row in rows:
+        items.append(
+            ApiPlanItem(
+                plan_id=str(row.get("计划ID", "")).strip(),
+                coverage_type=str(row.get("覆盖项", "")).strip(),
+                source_type=str(row.get("来源类型", "")).strip(),
+                source_name=str(row.get("来源名称", "")).strip(),
+                risk_type=str(row.get("风险类型", "")).strip(),
+                suggested_test_point=str(row.get("建议测试点", "")).strip(),
+                estimated_count=_to_int(row.get("预计用例数", 1), default=1),
+                included=bool(row.get("是否参与生成", False)),
+            )
+        )
+    return items
+
+
 def design_plan_summary_rows(plan: ApiDesignPlan) -> list[dict[str, str | int]]:
+    included_items = [item for item in plan.plan_items if item.included]
     return [
         {"项目": "生成策略", "内容": plan.strategy},
         {"项目": "覆盖项", "内容": "、".join(plan.coverage_types)},
         {"项目": "计划生成的用例类型", "内容": "、".join(plan.planned_case_types) or "-"},
         {"项目": "预计生成用例数量", "内容": plan.estimated_case_count},
+        {"项目": "计划生成项", "内容": len(included_items)},
         {"项目": "识别到的参数风险", "内容": len(plan.param_risks)},
         {"项目": "识别到的业务规则", "内容": len([rule for rule in plan.business_rule_risks if rule.included])},
         {"项目": "识别到的数据库校验", "内容": len(plan.db_checks)},
     ]
+
+
+def _fixed_item(
+    plan_id: str,
+    coverage_type: str,
+    source_name: str,
+    risk_type: str,
+    suggested_test_point: str,
+    source_type: str = "fixed",
+) -> ApiPlanItem:
+    return ApiPlanItem(
+        plan_id=plan_id,
+        coverage_type=coverage_type,
+        source_type=source_type,
+        source_name=source_name,
+        risk_type=risk_type,
+        suggested_test_point=suggested_test_point,
+        estimated_count=1,
+        included=True,
+    )
 
 
 def _param_to_risk(param: ApiParam) -> ApiParamRisk:
@@ -222,57 +385,44 @@ def _param_to_risk(param: ApiParam) -> ApiParamRisk:
     )
 
 
-def _planned_case_types(
-    document: ApiDocument,
-    param_risks: list[ApiParamRisk],
-    business_rule_risks: list[ApiBusinessRuleRisk],
-    db_checks: list[str],
-    coverage_types: list[str],
-) -> list[str]:
-    planned = []
-    for coverage in coverage_types:
-        if coverage == "参数校验" and not param_risks:
-            continue
-        if coverage == "权限校验" and not document.auth.strip():
-            continue
-        if coverage == "业务规则" and not [rule for rule in business_rule_risks if rule.included]:
-            continue
-        if coverage == "响应断言" and not document.response_example.strip():
-            continue
-        if coverage == "数据库校验" and not db_checks:
-            continue
-        planned.append(coverage)
-    return planned
+def _planned_case_types(plan_items: list[ApiPlanItem]) -> list[str]:
+    return _unique([item.coverage_type for item in plan_items if item.included])
 
 
-def _estimate_param_case_count(params: list[ApiParam], strategy: str) -> int:
-    if not params:
-        return 1
-    per_param_counts = [_param_case_point_count(param) for param in params]
-    if strategy == "精简":
-        return min(2, max(per_param_counts))
+def _param_plan_points(risks: list[ApiParamRisk]) -> list[tuple[ApiParamRisk, str, str]]:
+    points = []
+    for risk in risks:
+        risk_types = risk.risk_type.split("、")
+        test_points = risk.suggested_test_point.split("；")
+        for index, risk_type in enumerate(risk_types):
+            test_point = test_points[index] if index < len(test_points) else risk.suggested_test_point
+            points.append((risk, risk_type, test_point))
+    return points
+
+
+def _select_param_plan_points(
+    points: list[tuple[ApiParamRisk, str, str]],
+    strategy: str,
+) -> list[tuple[ApiParamRisk, str, str]]:
     if strategy == "完整":
-        return sum(per_param_counts)
-    return min(6, sum(min(2, count) for count in per_param_counts))
+        return points
+    high_risks = [
+        point
+        for point in points
+        if any(keyword in point[1] for keyword in ["必填", "类型", "边界", "枚举", "格式", "归属", "存在"])
+    ]
+    ordered = high_risks + [point for point in points if point not in high_risks]
+    if strategy == "精简":
+        return ordered[:2]
+    return ordered[:6]
 
 
-def _param_case_point_count(param: ApiParam) -> int:
-    count = 0
-    if param.required:
-        count += 1
-    if param.param_type:
-        count += 1
-    if _has_enum_rule(param):
-        count += 1
-    if _has_format_rule(param):
-        count += 1
-    if _has_boundary_rule(param):
-        count += 1
-    if _has_owner_rule(param):
-        count += 1
-    if _has_existence_rule(param):
-        count += 1
-    return count or 1
+def _select_business_risks(risks: list[ApiBusinessRuleRisk], strategy: str) -> list[ApiBusinessRuleRisk]:
+    if strategy == "精简":
+        return risks[:1]
+    if strategy == "完整":
+        return risks
+    return risks[:2]
 
 
 def _business_rule_risk_type(rule: str) -> str:
@@ -330,6 +480,17 @@ def _clean_item(line: str) -> str:
             value = value[1:].strip()
     value = value.lstrip("0123456789.、) ").strip()
     return value
+
+
+def _included_set(items: list[str] | None) -> set[str]:
+    return {item.strip() for item in items or [] if item.strip()}
+
+
+def _to_int(value, default: int = 1) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _unique(items: list[str]) -> list[str]:

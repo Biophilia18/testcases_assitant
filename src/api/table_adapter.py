@@ -28,6 +28,7 @@ def rows_to_api_cases(rows: Any) -> list[ApiTestCase]:
         cases.append(
             ApiTestCase(
                 case_id=_cell(row, "用例编号") or f"API-EDIT-{index:03d}",
+                case_title=_cell(row, "用例标题") or _fallback_case_title(row, index),
                 module=_cell(row, "模块"),
                 api_name=api_name,
                 method=_cell(row, "请求方法") or "GET",
@@ -59,6 +60,8 @@ def find_api_case_warnings(cases: list[ApiTestCase]) -> list[str]:
             warnings.append(f"{case.case_id}：用例编号重复。")
         seen_ids.add(case.case_id)
 
+        if not case.case_title:
+            warnings.append(f"{case.case_id}：缺少用例标题。")
         if not case.api_name:
             warnings.append(f"{case.case_id}：缺少接口名称。")
         if not case.method:
@@ -84,3 +87,9 @@ def _cell(row: dict[str, Any], column: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _fallback_case_title(row: dict[str, Any], index: int) -> str:
+    case_type = _cell(row, "用例类型") or "接口测试"
+    api_name = _cell(row, "接口名称") or f"编辑用例{index:03d}"
+    return f"{case_type}-{api_name}"
