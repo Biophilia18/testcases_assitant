@@ -49,12 +49,14 @@ def api_quality_issues_to_rows(issues: list[ApiQualityIssue]) -> list[dict[str, 
 def api_quality_summary(cases: list[ApiTestCase], issues: list[ApiQualityIssue]) -> dict[str, int]:
     error_count = sum(1 for issue in issues if issue.severity == "错误")
     warning_count = sum(1 for issue in issues if issue.severity == "警告")
+    suggestion_count = sum(1 for issue in issues if issue.severity == "建议")
     covered_categories = len(_covered_categories(cases))
     return {
         "case_count": len(cases),
         "issue_count": len(issues),
         "error_count": error_count,
         "warning_count": warning_count,
+        "suggestion_count": suggestion_count,
         "covered_categories": covered_categories,
     }
 
@@ -184,10 +186,21 @@ def _coverage_issues(cases: list[ApiTestCase], document: ApiDocument) -> list[Ap
         issues.append(
             ApiQualityIssue(
                 category="变量提取",
-                severity="警告",
+                severity="建议",
                 case_ids=missing_extract_case_ids,
                 message="部分用例可能需要变量提取但未填写。",
                 suggestion="如果后续接口依赖响应中的 id、token、编号等字段，可在变量提取列说明提取路径。",
+            )
+        )
+
+    if _has_multiple_parameter_cases(cases) and "响应断言" in _covered_categories(cases):
+        issues.append(
+            ApiQualityIssue(
+                category="测试建议",
+                severity="建议",
+                case_ids=[],
+                message="接口用例已覆盖参数和响应断言，可进一步补充真实业务错误码。",
+                suggestion="结合接口文档补充 code、message、traceId、data 等字段级断言，避免只依赖 HTTP 状态码。",
             )
         )
 
@@ -261,3 +274,8 @@ def _may_need_extract_vars(case: ApiTestCase) -> bool:
         return False
     text = f"{case.assertions} {case.remark} {case.case_type}"
     return any(keyword in text for keyword in ["id", "ID", "编号", "token", "Token", "appointmentNo"])
+
+
+def _has_multiple_parameter_cases(cases: list[ApiTestCase]) -> bool:
+    count = sum(1 for case in cases if case.case_type in {"参数校验", "边界值"})
+    return count >= 2

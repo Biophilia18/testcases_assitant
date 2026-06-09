@@ -80,3 +80,18 @@ def test_generate_api_cases_keeps_basic_cases_when_document_is_sparse() -> None:
     case_types = {case.case_type for case in cases}
 
     assert {"正常请求", "参数校验", "鉴权校验"}.issubset(case_types)
+
+
+def test_generate_api_cases_respects_selected_coverage_types() -> None:
+    cases = generate_api_cases(_document(), coverage_types=["正常请求", "业务规则"], business_rules=["设备在线才允许控制"])
+    case_types = {case.case_type for case in cases}
+
+    assert case_types == {"正常请求", "业务规则"}
+    assert all("参数" not in case.case_type for case in cases)
+
+
+def test_generate_api_cases_respects_compact_strategy() -> None:
+    cases = generate_api_cases(_document(), coverage_types=["参数校验"], strategy="精简")
+
+    assert len(cases) <= 3
+    assert all(case.case_type in {"参数校验", "边界值"} for case in cases)
