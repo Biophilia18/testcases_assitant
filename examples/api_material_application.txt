@@ -1,0 +1,48 @@
+项目/系统名称：物资后勤管理系统
+业务模块：物资领用申请
+接口名称：提交物资领用申请接口
+请求方法：POST
+接口路径：/api/material/applications
+鉴权方式：Bearer Token
+请求头：
+Authorization: Bearer ${token}
+Content-Type: application/json
+请求参数：无
+请求体：
+{
+  "materialId": 10001,
+  "quantity": 5,
+  "applyReason": "项目现场维修使用",
+  "departmentId": 3001
+}
+字段说明：
+materialId：物资ID，必填，integer，必须存在，必须属于当前用户可申请范围
+quantity：领用数量，必填，integer，大于0，不能大于库存
+applyReason：申请原因，必填，string，长度1-200
+departmentId：申请部门ID，必填，integer，必须存在，必须属于当前用户
+成功响应：
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "applicationNo": "WL202606090001",
+    "status": "待审批"
+  }
+}
+失败响应：
+{
+  "code": 400,
+  "message": "quantity exceeds stock"
+}
+业务规则：
+申请人必须属于申请部门
+物资必须存在且处于可领用状态
+领用数量不能大于当前库存
+重复点击提交按钮不能生成多条申请单
+无物资权限的用户不能提交申请
+数据库校验：
+物资申请主表生成申请记录
+申请状态为待审批
+库存不能被提前扣减
+申请编号唯一
+申请明细中的物资ID、数量、部门与请求内容一致

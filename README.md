@@ -1,17 +1,15 @@
 # AI 辅助测试用例生成与导出工具
 
-基于 Streamlit 的本地测试用例生成、编辑和导出工具。
-
-当前版本：`v0.3.4`
+本项目是一个本地 Streamlit 测试用例助手，目标是把需求或接口文档稳定转换为可编辑、可解释、可导出的测试设计结果。
 
 ## 当前能力
 
-- 功能测试：需求上传/填写、规则生成、AI 生成、生成前预览、用例编辑、质量检查、历史 JSON、Excel 双 sheet 导出。
-- 接口测试：md/txt 接口文档上传或粘贴、字段解析、参数解析、参数级规则生成、覆盖提示矩阵、质量检查、用例编辑、Excel 双 sheet 导出。
-- AI 服务：支持 DeepSeek 和 OpenAI；未配置 Key 或调用失败时自动回退规则生成。
-- 示例文件：`examples/` 内含功能测试需求和接口文档示例。
+- 功能测试：需求解析、功能点预览、规则/AI 生成、用例编辑、质量检查、JSON 保存、Excel 导出。
+- 接口测试：单接口文档解析、接口清单识别、文档可信度提示、参数风险分析、规则生成、用例编辑、质量检查、Excel 导出。
+- 接口自动化辅助：可导出 `api_auto` YAML 草稿，但不承诺直接可执行。
+- 示例验收：内置爱家政、物资后勤、智控家等接口示例，覆盖 GET/POST/PUT/PATCH/DELETE。
 
-暂不支持：RAG、数据库、FastAPI、独立前端框架、Swagger/OpenAPI 解析、接口自动化脚本生成、登录系统。
+暂不支持：RAG、数据库、FastAPI、独立前端、Swagger/OpenAPI、Postman、真实接口执行、pytest 脚本生成。
 
 ## 运行
 
@@ -20,16 +18,10 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Windows 也可以运行：
+或在 Windows 下运行：
 
 ```powershell
 run_app.bat
-```
-
-通常访问：
-
-```text
-http://localhost:8501
 ```
 
 ## 环境变量
@@ -45,59 +37,36 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-`.env` 存放真实 Key，不要提交 Git。
+不要提交真实 API Key。
 
-## 功能测试模式
+## 接口测试模式说明
 
-主要流程：
+当前接口模式优先支持“单接口测试设计”。如果粘贴模块级多接口文档，工具会先识别接口清单，用户选择一个接口后再进入单接口生成流程。
 
-1. 上传 `.txt` / `.md` / `.docx` 需求，或手动填写需求模板。
-2. 选择规则生成或 AI 生成。
-3. 预览识别到的功能点，取消误识别项。
-4. 生成并编辑测试用例。
-5. 查看质量评分、覆盖提示矩阵和分类质量提示。
-6. 保存 JSON 或导出 Excel。
+接口清单会展示：
 
-导出 Excel 包含：
+- 参数数
+- 是否有鉴权
+- 是否有业务规则
+- 是否有数据库校验
+- 复杂度：低 / 中 / 高
 
-- `测试用例`
-- `质量报告`
+生成前会做接口文档可信度检查：缺少请求方法或接口路径时不会生成；缺少参数、鉴权、响应示例或业务规则时只提示，不会凭空编造对应测试点。
 
-## 接口测试模式
+参数识别支持普通文本和 Markdown 表格，会区分路径参数、查询参数和请求体字段，避免把路径参数误拼成 URL query。
 
-主要流程：
+生成后可导出：
 
-1. 上传 `.txt` / `.md` 接口文档，或粘贴接口文档。
-2. 确认并修正解析结果。
-3. 生成接口测试用例。
-4. 编辑用例并查看覆盖提示矩阵、质量提示。
-5. 导出接口 Excel。
+- 接口测试 Excel
+- `api_auto` YAML 草稿
 
-接口用例字段：
+YAML 草稿需要人工补充或复核 token、环境变量、复杂断言、数据库 SQL 和测试数据。
 
-```text
-用例编号、模块、接口名称、请求方法、接口路径、请求头、请求参数、请求体、
-前置条件、操作步骤、预期状态码、断言点、数据库校验、变量提取、
-优先级、用例类型、备注
+## 测试
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
 ```
-
-接口规则生成覆盖：
-
-- 正常请求
-- 必填参数为空
-- 参数类型错误
-- 参数边界/非法值
-- 未鉴权或 Token 缺失
-- 权限不足
-- 业务规则不满足
-- 重复请求/幂等性
-- 响应字段断言
-- 数据库校验
-
-导出 Excel 包含：
-
-- `接口测试用例`
-- `接口质量报告`
 
 ## 示例文件
 
@@ -114,32 +83,13 @@ examples/smart_home_alarm.txt
 接口测试示例：
 
 ```text
-examples/api_smart_home_device_control.md
 examples/api_housekeeping_appointment.txt
+examples/api_material_application.txt
+examples/api_smart_home_device_control.md
 ```
 
-## 测试
+## 后续方向
 
-```powershell
-.\.venv\Scripts\python -m pytest -q
-```
-
-当前测试覆盖核心解析、生成、表格转换、质量检查、Excel 导出、持久化和提示矩阵逻辑。
-
-## 目录结构
-
-```text
-app.py                 Streamlit 入口
-src/api/               接口测试模式：解析、参数、生成、质量、导出、UI
-src/*.py               功能测试模式和通用工具
-prompts/functional.md  功能测试 AI Prompt
-examples/              示例需求和接口文档
-tests/                 pytest 测试
-outputs/               本地生成结果，不提交 Git
-```
-
-## 下一步
-
-- 功能测试与接口测试结果的本地历史管理进一步统一。
-- 继续观察接口参数解析准确性，必要时支持更复杂的字段表格格式。
-- 稳定后再考虑更细的分包重构。
+- 继续提升接口清单识别稳定性。
+- 强化接口 YAML 草稿的自动化就绪度检查。
+- 稳定后再做模块分包和文档整理。

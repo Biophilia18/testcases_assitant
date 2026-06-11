@@ -13,8 +13,14 @@ TITLE_TO_FIELD = {
     "模块": "module",
     "接口名称": "api_name",
     "请求方法": "method",
+    "请求方式": "method",
+    "Method": "method",
+    "HTTP Method": "method",
     "接口路径": "path",
     "请求路径": "path",
+    "接口地址": "path",
+    "请求地址": "path",
+    "API地址": "path",
     "URL": "path",
     "鉴权方式": "auth",
     "鉴权": "auth",
@@ -23,20 +29,30 @@ TITLE_TO_FIELD = {
     "Header": "headers",
     "Headers": "headers",
     "请求参数": "params",
+    "入参": "params",
+    "请求入参": "params",
+    "参数说明": "params",
     "Query参数": "params",
     "字段说明": "params",
     "请求体": "body",
     "请求Body": "body",
+    "Body参数": "body",
     "成功响应": "response_example",
     "失败响应": "response_example",
     "响应示例": "response_example",
+    "返回示例": "response_example",
+    "Response": "response_example",
+    "返回参数": "response_example",
+    "错误码": "response_example",
+    "异常返回": "response_example",
+    "失败示例": "response_example",
     "业务规则": "business_rules",
     "数据库校验": "db_checks",
     "数据校验": "db_checks",
 }
 
 TITLE_PATTERN = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(项目/系统名称|项目名称|系统名称|业务模块|模块|接口名称|请求方法|接口路径|请求路径|URL|鉴权方式|鉴权|认证方式|请求头|Header|Headers|请求参数|Query参数|字段说明|请求体|请求Body|成功响应|失败响应|响应示例|业务规则|数据库校验|数据校验)\s*[:：]?\s*(.*)$",
+    r"^\s*(?:#{1,6}\s*)?(项目/系统名称|项目名称|系统名称|业务模块|模块|接口名称|请求方法|请求方式|Method|HTTP Method|接口路径|请求路径|接口地址|请求地址|API地址|URL|鉴权方式|鉴权|认证方式|请求头|Header|Headers|请求参数|入参|请求入参|参数说明|Query参数|字段说明|请求体|请求Body|Body参数|成功响应|失败响应|响应示例|返回示例|Response|返回参数|错误码|异常返回|失败示例|业务规则|数据库校验|数据校验)\s*[:：]?\s*(.*)$",
     re.IGNORECASE,
 )
 
@@ -128,13 +144,15 @@ def _normalize_title(title: str) -> str:
 
 def _normalize_method(method: str) -> str:
     normalized = method.strip().upper()
-    if normalized in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+    if normalized in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
         return normalized
     return method.strip()
 
 
 def _clean_list_marker(line: str) -> str:
     cleaned = line.strip()
+    if re.fullmatch(r"[-*_]{3,}", cleaned):
+        return ""
     if cleaned.startswith("```"):
         return ""
     cleaned = re.sub(r"^[-*•]\s*", "", cleaned)

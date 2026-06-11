@@ -8,15 +8,24 @@ from src.api.design_plan import (
     API_GENERATION_STRATEGIES,
     build_api_design_plan,
     business_rule_risks_to_rows,
-    design_plan_summary_rows,
     param_risks_to_rows,
     plan_items_to_rows,
     rows_to_plan_items,
+    split_api_text_items,
 )
+from src.api.document_candidates import api_document_candidates_to_rows, candidate_complexity_label, extract_api_document_candidates
 from src.api.document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
+from src.api.examples import API_EXAMPLE_BY_NAME, API_EXAMPLE_DOCUMENTS
 from src.api.exporter import build_api_excel
 from src.api.models import ApiDocument, ApiTestCase
+from src.api.param_parser import parse_api_params
 from src.api.quality_checker import analyze_api_quality, api_quality_issues_to_rows, api_quality_summary
+from src.api.reliability import (
+    api_document_generation_blockers,
+    api_document_reliability_level,
+    api_reliability_issues_to_rows,
+    assess_api_document_reliability,
+)
 from src.api.rule_generator import build_api_plan_trace_rows, generate_api_cases
 from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, rows_to_api_cases
 from src.document_loader import load_requirement_document
@@ -24,13 +33,14 @@ from src.document_loader import load_requirement_document
 
 def render_api_test_page() -> None:
     st.title("接口测试用例编辑与导出")
-    st.caption("当前接口测试模式为规则生成 MVP：支持接口文档识别、手动修正、规则生成、表格编辑和 Excel 导出，暂不接 AI。")
+    st.caption("当前接口模式重点支持单个接口的测试设计：识别接口文档、生成用例、编辑复核并导出 Excel；api_auto YAML 仅作为草稿导出。")
 
     _render_api_progress_summary()
     document_text = _render_api_step_input()
     st.divider()
     document = _render_api_step_document_confirm()
     _render_api_current_summary(document)
+    _render_api_reliability_panel(document)
     st.divider()
     design_options = _render_api_step_design_plan(document)
     st.divider()
@@ -42,7 +52,21 @@ def render_api_test_page() -> None:
 
 
 def _render_api_step_input() -> str:
-    st.subheader("Step 1：接口文档输入")
+    st.subheader("Step 1：接口文档输入（单接口）")
+    st.caption("当前阶段优先处理一个接口的文档。若粘贴的是模块级多接口文档，建议先选取其中一个接口片段进行设计。")
+    example_col1, example_col2 = st.columns([2, 1])
+    with example_col1:
+        example_name = st.selectbox(
+            "接口示例文档",
+            ["不使用示例"] + [example.name for example in API_EXAMPLE_DOCUMENTS],
+            key="api_example_document_name",
+        )
+    with example_col2:
+        st.write("")
+        st.write("")
+        if st.button("填充示例文档", disabled=example_name == "不使用示例"):
+            _apply_api_example_document(example_name)
+
     api_document_file = st.file_uploader(
         "上传接口文档（txt / md）",
         type=["txt", "md"],
@@ -74,11 +98,9 @@ def _render_api_step_input() -> str:
         if not api_document_text.strip():
             st.warning("请先粘贴或上传接口文档内容。")
         else:
-            parsed_document = parse_api_document(api_document_text)
-            _apply_api_document_to_state(parsed_document)
-            _clear_api_cases()
-            st.session_state["api_document_parsed"] = True
-            st.success("已解析接口文档，请检查并手动修正识别结果。")
+            _parse_and_apply_api_document_text(api_document_text)
+    _render_api_candidate_selector()
+    _render_current_api_candidate_status()
     return api_document_text
 
 
@@ -94,7 +116,7 @@ def _render_api_step_document_confirm() -> ApiDocument:
             module = st.text_input("业务模块", key="api_module", placeholder="例如：设备控制")
             api_name = st.text_input("接口名称", key="api_name", placeholder="例如：设备控制接口")
         with col2:
-            method = st.selectbox("请求方法", ["GET", "POST", "PUT", "PATCH", "DELETE"], index=1, key="api_method")
+            method = st.selectbox("请求方法", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], index=1, key="api_method")
             path = st.text_input("接口路径", key="api_path", placeholder="例如：/api/devices/{deviceId}/control")
             auth = st.text_input("鉴权方式", key="api_auth", placeholder="例如：Bearer Token / Session / 无")
 
@@ -152,10 +174,32 @@ def _render_api_current_summary(document: ApiDocument) -> None:
     )
 
 
+def _render_api_reliability_panel(document: ApiDocument) -> None:
+    issues = assess_api_document_reliability(document)
+    if not issues:
+        st.success("接口文档可信度：较高。仍建议在生成后复核断言、测试数据和数据库校验。")
+        return
+
+    level = api_document_reliability_level(issues)
+    warning_count = len([issue for issue in issues if issue.severity == "警告"])
+    blocker_count = len([issue for issue in issues if issue.severity == "错误"])
+    suggestion_count = len([issue for issue in issues if issue.severity == "建议"])
+    caption = f"接口文档可信度：{level}。错误 {blocker_count} 个，警告 {warning_count} 个，建议 {suggestion_count} 个。"
+    if blocker_count:
+        st.error(caption)
+    elif warning_count:
+        st.warning(caption)
+    else:
+        st.info(caption)
+
+    with st.expander("查看接口文档可信度提示", expanded=bool(blocker_count)):
+        st.dataframe(api_reliability_issues_to_rows(issues), use_container_width=True, hide_index=True)
+
+
 def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
-    st.subheader("Step 3：测试设计计划")
+    st.subheader("Step 3：生成前预览与确认")
     if not _has_basic_api_document(document):
-        st.info("填写或解析接口文档后，这里会展示参数风险、业务规则、覆盖项和预计用例数量。")
+        st.info("填写或解析接口文档后，这里会展示接口概要、覆盖项、预计用例数量和高级设计选项。")
 
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -176,63 +220,64 @@ def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
 
     preview_plan = build_api_design_plan(document, coverage_types=coverage_types, strategy=strategy)
     business_rows = business_rule_risks_to_rows(preview_plan.business_rule_risks)
-    if business_rows:
-        st.markdown("**业务规则识别**")
-        edited_business_rows = st.data_editor(
-            business_rows,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["规则内容", "风险类型", "建议测试点"],
-            key="api_business_rule_plan_editor",
+    with st.expander("高级设计选项：业务规则、参数风险与计划项", expanded=False):
+        if business_rows:
+            st.markdown("**业务规则识别**")
+            edited_business_rows = st.data_editor(
+                business_rows,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["规则内容", "风险类型", "建议测试点"],
+                key="api_business_rule_plan_editor",
+            )
+            included_business_rules = _included_business_rules_from_rows(edited_business_rows)
+        else:
+            st.info("未识别到业务规则。可以在 Step 2 的“业务规则”中补充后再生成。")
+            included_business_rules = []
+
+        plan = build_api_design_plan(
+            document,
+            coverage_types=coverage_types,
+            strategy=strategy,
+            included_business_rules=included_business_rules if business_rows else None,
         )
-        included_business_rules = _included_business_rules_from_rows(edited_business_rows)
-    else:
-        st.info("未识别到业务规则。可以在 Step 2 的“业务规则”中补充后再生成。")
-        included_business_rules = []
 
-    plan = build_api_design_plan(
-        document,
-        coverage_types=coverage_types,
-        strategy=strategy,
-        included_business_rules=included_business_rules if business_rows else None,
-    )
+        st.markdown("**参数风险分析**")
+        if plan.param_risks:
+            edited_param_rows = st.data_editor(
+                param_risks_to_rows(plan.param_risks),
+                use_container_width=True,
+                hide_index=True,
+                disabled=["参数名", "参数来源", "是否必填", "参数类型", "识别到的规则", "风险类型", "建议测试点"],
+                key="api_param_risk_plan_editor",
+            )
+            included_param_names = _included_param_names_from_rows(edited_param_rows)
+        else:
+            st.info("未识别到参数。可以在 Step 2 的“请求参数 / 字段说明”或“请求体”中补充。")
+            included_param_names = []
 
-    st.markdown("**参数风险分析**")
-    if plan.param_risks:
-        edited_param_rows = st.data_editor(
-            param_risks_to_rows(plan.param_risks),
-            use_container_width=True,
-            hide_index=True,
-            disabled=["参数名", "参数来源", "是否必填", "参数类型", "识别到的规则", "风险类型", "建议测试点"],
-            key="api_param_risk_plan_editor",
+        plan = build_api_design_plan(
+            document,
+            coverage_types=coverage_types,
+            strategy=strategy,
+            included_business_rules=included_business_rules if business_rows else None,
+            included_param_names=included_param_names if plan.param_risks else None,
         )
-        included_param_names = _included_param_names_from_rows(edited_param_rows)
-    else:
-        st.info("未识别到参数。可以在 Step 2 的“请求参数 / 字段说明”或“请求体”中补充。")
-        included_param_names = []
 
-    plan = build_api_design_plan(
-        document,
-        coverage_types=coverage_types,
-        strategy=strategy,
-        included_business_rules=included_business_rules if business_rows else None,
-        included_param_names=included_param_names if plan.param_risks else None,
-    )
-
-    st.markdown("**计划生成项**")
-    plan_rows = plan_items_to_rows(plan.plan_items)
-    if plan_rows:
-        edited_plan_rows = st.data_editor(
-            plan_rows,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["计划ID", "覆盖项", "来源类型", "来源名称", "风险类型", "建议测试点", "预计用例数"],
-            key="api_plan_item_editor",
-        )
-        plan_items = rows_to_plan_items(edited_plan_rows)
-    else:
-        st.info("当前未形成计划生成项。请检查覆盖项选择或补充接口文档信息。")
-        plan_items = []
+        st.markdown("**计划生成项**")
+        plan_rows = plan_items_to_rows(plan.plan_items)
+        if plan_rows:
+            edited_plan_rows = st.data_editor(
+                plan_rows,
+                use_container_width=True,
+                hide_index=True,
+                disabled=["计划ID", "覆盖项", "来源类型", "来源名称", "风险类型", "建议测试点", "预计用例数"],
+                key="api_plan_item_editor",
+            )
+            plan_items = rows_to_plan_items(edited_plan_rows)
+        else:
+            st.info("当前未形成计划生成项。请检查覆盖项选择或补充接口文档信息。")
+            plan_items = []
 
     estimated_count = sum(item.estimated_count for item in plan_items if item.included)
     plan.estimated_case_count = estimated_count
@@ -240,12 +285,12 @@ def _render_api_step_design_plan(document: ApiDocument) -> dict[str, object]:
 
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     metric_col1.metric("预计用例数", plan.estimated_case_count)
-    metric_col2.metric("参数风险", len(plan.param_risks))
+    metric_col2.metric("识别参数", len(plan.param_risks))
     metric_col3.metric("业务规则", len([rule for rule in plan.business_rule_risks if rule.included]))
     metric_col4.metric("数据库校验", len(plan.db_checks))
 
-    st.markdown("**计划摘要**")
-    st.dataframe(design_plan_summary_rows(plan), use_container_width=True, hide_index=True)
+    st.markdown("**生成前预览**")
+    st.dataframe(_api_generation_preview_rows(document, plan), use_container_width=True, hide_index=True)
 
     if plan.db_checks:
         with st.expander("数据库校验识别", expanded=False):
@@ -268,7 +313,11 @@ def _render_api_step_generate(document: ApiDocument, has_document_text: bool, de
     if current_cases:
         _render_api_case_summary(current_cases)
 
-    if st.button("生成接口测试用例", type="primary"):
+    blockers = api_document_generation_blockers(document)
+    if blockers:
+        st.error("接口文档缺少必要信息，已暂时禁用生成。请先补充请求方法和接口路径。")
+
+    if st.button("生成接口测试用例", type="primary", disabled=bool(blockers)):
         plan_items = list(design_options.get("plan_items", []))
         st.session_state["api_cases"] = generate_api_cases(
             document,
@@ -291,8 +340,6 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
         return []
 
     _render_api_review_summary(api_cases, document)
-    _render_api_case_groups(api_cases)
-    _render_api_plan_trace(api_cases)
     edited_rows = st.data_editor(
         api_cases_to_rows(api_cases),
         use_container_width=True,
@@ -308,6 +355,10 @@ def _render_api_step_edit_and_quality(document: ApiDocument) -> list[ApiTestCase
         with st.expander(f"接口用例检查：发现 {len(warnings)} 个提示", expanded=False):
             for warning in warnings:
                 st.warning(warning)
+
+    _render_api_generation_self_check(edited_cases, document)
+    _render_api_case_groups(edited_cases)
+    _render_api_plan_trace(edited_cases)
 
     st.markdown("**接口质量检查**")
     quality_col1, quality_col2 = st.columns(2)
@@ -341,7 +392,7 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
             st.info("生成接口测试用例后，这里会展示可供 api_auto 使用的 YAML 预览。")
             return
 
-        st.caption("YAML 会按 api_auto 当前结构生成 feature/story/title/request/extract/validate。导出后仍建议结合真实环境补充 token、测试数据和复杂断言。")
+        st.caption("这是面向 api_auto 的 YAML 草稿预览，不承诺导出后可直接执行。落地前需要人工补充或复核 token、环境变量、复杂断言、数据库 SQL 和测试数据。")
         st.dataframe(build_api_auto_preview_rows(cases), use_container_width=True, hide_index=True)
         yaml_text = build_api_auto_yaml(cases, document)
         st.code(yaml_text, language="yaml")
@@ -395,6 +446,28 @@ def _render_api_review_summary(cases: list[ApiTestCase], document: ApiDocument) 
     col5.metric("建议", summary.get("suggestion_count", 0))
 
 
+def _render_api_generation_self_check(cases: list[ApiTestCase], document: ApiDocument) -> None:
+    params = parse_api_params(document)
+    business_rules = split_api_text_items(document.business_rules)
+    coverage_matrix = build_api_coverage_matrix(cases)
+    covered_count = sum(1 for item in coverage_matrix if item.covered)
+    issues = analyze_api_quality(cases, document)
+    review_items = _manual_review_items(cases, document, issues)
+
+    with st.expander("生成质量自检摘要", expanded=True):
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("识别参数数", len(params))
+        col2.metric("业务规则数", len(business_rules))
+        col3.metric("生成用例数", len(cases))
+        col4.metric("覆盖项数量", f"{covered_count}/{len(coverage_matrix)}")
+        col5.metric("人工复核项", len(review_items))
+        st.dataframe(
+            [{"建议人工复核项": item} for item in review_items] or [{"建议人工复核项": "暂无明显复核提示，仍建议结合真实接口文档抽查。"}],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 def _render_api_coverage_matrix(cases: list[ApiTestCase]) -> None:
     matrix = build_api_coverage_matrix(cases)
     covered_count = sum(1 for item in matrix if item.covered)
@@ -438,7 +511,7 @@ def _render_api_case_groups(cases: list[ApiTestCase]) -> None:
         group_name = _api_case_group_name(case)
         grouped.setdefault(group_name, []).append(f"{case.case_id} {case.case_type}")
 
-    with st.expander("按场景分组查看", expanded=True):
+    with st.expander("按场景分组查看", expanded=False):
         rows = [
             {"场景分组": name, "用例数": len(case_ids), "命中用例": "、".join(case_ids) if case_ids else "-"}
             for name, case_ids in grouped.items()
@@ -451,7 +524,7 @@ def _render_api_plan_trace(cases: list[ApiTestCase]) -> None:
     if not plan_items:
         return
 
-    with st.expander("测试计划覆盖追踪", expanded=True):
+    with st.expander("测试计划覆盖追踪", expanded=False):
         st.dataframe(build_api_plan_trace_rows(plan_items, cases), use_container_width=True, hide_index=True)
 
 
@@ -502,6 +575,31 @@ def _planned_case_types_from_items(plan_items) -> list[str]:
     return planned
 
 
+def _manual_review_items(cases: list[ApiTestCase], document: ApiDocument, issues) -> list[str]:
+    review_items = []
+    if any(issue.severity in {"警告", "建议"} for issue in issues):
+        review_items.append("质量检查中存在警告或建议，需要确认断言、测试数据和覆盖范围。")
+    if document.auth.strip():
+        review_items.append("接口包含鉴权，需确认 token 获取方式、权限账号和过期场景。")
+    if document.db_checks.strip():
+        review_items.append("接口包含数据库校验，需补充真实 SQL、期望值和测试环境数据准备方式。")
+    if any("${token}" in case.headers or "{token}" in case.headers for case in cases):
+        review_items.append("YAML 草稿中包含 token 占位，需要在 api_auto 中准备登录或上下文变量。")
+    if not any(case.case_type == "响应断言" for case in cases):
+        review_items.append("未生成独立响应断言用例，建议确认响应字段、业务码和错误码。")
+    return review_items
+
+
+def _apply_api_example_document(example_name: str) -> None:
+    example = API_EXAMPLE_BY_NAME.get(example_name)
+    if not example:
+        return
+
+    st.session_state["api_document_text"] = example.text
+    _parse_and_apply_api_document_text(example.text)
+    st.success(f"已填充示例文档：{example.name}。")
+
+
 def _apply_uploaded_api_document(uploaded_file) -> None:
     upload_key = f"{uploaded_file.name}:{getattr(uploaded_file, 'size', 0)}"
     if st.session_state.get("last_api_document_upload") == upload_key:
@@ -513,13 +611,83 @@ def _apply_uploaded_api_document(uploaded_file) -> None:
         st.error(f"接口文档读取失败：{exc}")
         return
 
-    parsed_document = parse_api_document(raw_text)
     st.session_state["api_document_text"] = raw_text
-    _apply_api_document_to_state(parsed_document)
-    _clear_api_cases()
-    st.session_state["api_document_parsed"] = True
+    _parse_and_apply_api_document_text(raw_text)
     st.session_state["last_api_document_upload"] = upload_key
     st.success("已读取并解析接口文档，请检查解析结果并手动修正。")
+
+
+def _parse_and_apply_api_document_text(text: str) -> None:
+    candidates = extract_api_document_candidates(text)
+    st.session_state["api_document_candidates"] = candidates
+
+    if len(candidates) > 1:
+        selected_candidate = candidates[0]
+        st.session_state["api_selected_candidate_index"] = selected_candidate.index
+        _apply_api_document_to_state(selected_candidate.document)
+        _clear_api_cases()
+        st.session_state["api_document_parsed"] = True
+        st.info(f"识别到 {len(candidates)} 个接口，已默认选择第 1 个。可在接口清单中切换。")
+        return
+
+    document = candidates[0].document if candidates else parse_api_document(text)
+    st.session_state["api_document_candidates"] = []
+    st.session_state.pop("api_selected_candidate_index", None)
+    _apply_api_document_to_state(document)
+    _clear_api_cases()
+    st.session_state["api_document_parsed"] = True
+    st.success("已解析接口文档，请检查并手动修正识别结果。")
+
+
+def _render_api_candidate_selector() -> None:
+    candidates = st.session_state.get("api_document_candidates") or []
+    if len(candidates) <= 1:
+        return
+
+    with st.expander(f"识别到的接口清单（{len(candidates)} 个）", expanded=True):
+        st.caption("当前不批量生成。请选择一个接口进入后续单接口测试设计流程。")
+        _render_api_candidate_summary(candidates)
+        st.dataframe(api_document_candidates_to_rows(candidates), use_container_width=True, hide_index=True)
+        selected_index = st.selectbox(
+            "选择要设计的接口",
+            [candidate.index for candidate in candidates],
+            format_func=lambda index: next(candidate.display_name for candidate in candidates if candidate.index == index),
+            key="api_candidate_selector",
+        )
+        if st.button("使用选中的接口"):
+            selected_candidate = next(candidate for candidate in candidates if candidate.index == selected_index)
+            st.session_state["api_document_text"] = selected_candidate.source_text
+            st.session_state["api_selected_candidate_index"] = selected_candidate.index
+            _apply_api_document_to_state(selected_candidate.document)
+            _clear_api_cases()
+            st.session_state["api_document_parsed"] = True
+            st.success(f"已切换到接口：{selected_candidate.display_name}")
+
+
+def _render_current_api_candidate_status() -> None:
+    candidates = st.session_state.get("api_document_candidates") or []
+    selected_index = st.session_state.get("api_selected_candidate_index")
+    if len(candidates) <= 1 or not selected_index:
+        return
+
+    selected_candidate = next((candidate for candidate in candidates if candidate.index == selected_index), None)
+    if not selected_candidate:
+        return
+
+    complexity = candidate_complexity_label(selected_candidate.document)
+    st.info(f"当前正在设计：第 {selected_candidate.index} 个接口，{selected_candidate.display_name}，复杂度：{complexity}")
+
+
+def _render_api_candidate_summary(candidates) -> None:
+    auth_count = sum(1 for candidate in candidates if candidate.document.auth.strip())
+    param_count = sum(1 for candidate in candidates if parse_api_params(candidate.document))
+    rule_count = sum(1 for candidate in candidates if candidate.document.business_rules.strip())
+    db_count = sum(1 for candidate in candidates if candidate.document.db_checks.strip())
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("接口数", len(candidates))
+    col2.metric("有参数", param_count)
+    col3.metric("有鉴权", auth_count)
+    col4.metric("有规则/DB", f"{rule_count}/{db_count}")
 
 
 def _apply_api_document_to_state(document: ApiDocument) -> None:
@@ -560,6 +728,32 @@ def _api_document_preview_rows(document: ApiDocument) -> list[dict[str, str]]:
         {"字段": "业务规则", "识别内容": document.business_rules},
         {"字段": "数据库校验", "识别内容": document.db_checks},
     ]
+
+
+def _api_generation_preview_rows(document: ApiDocument, plan) -> list[dict[str, str | int]]:
+    included_plan_items = [item for item in plan.plan_items if item.included]
+    return [
+        {"预览项": "当前处理范围", "内容": "单接口测试设计"},
+        {"预览项": "接口名称", "内容": document.api_name or "-"},
+        {"预览项": "请求方法", "内容": document.method or "-"},
+        {"预览项": "接口路径", "内容": document.path or "-"},
+        {"预览项": "覆盖项", "内容": "、".join(plan.coverage_types) or "-"},
+        {"预览项": "计划生成类型", "内容": "、".join(plan.planned_case_types) or "-"},
+        {"预览项": "计划生成项", "内容": len(included_plan_items)},
+        {"预览项": "预计生成用例数", "内容": plan.estimated_case_count},
+        {"预览项": "api_auto YAML 草稿", "内容": _api_auto_draft_readiness(document)},
+        {"预览项": "说明", "内容": "参数风险和计划项可在上方高级设计选项中调整。"},
+    ]
+
+
+def _api_auto_draft_readiness(document: ApiDocument) -> str:
+    if not document.method or not document.path:
+        return "缺少请求方法或接口路径，暂不适合导出"
+    if not document.response_example:
+        return "可导出基础草稿，建议补响应示例"
+    if document.auth and not document.headers:
+        return "可导出基础草稿，需补鉴权请求头"
+    return "可导出基础草稿，仍需人工复核"
 
 
 def _build_api_export_filename(project_name: str, module: str) -> str:

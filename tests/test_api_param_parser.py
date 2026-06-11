@@ -63,3 +63,40 @@ def test_parse_api_params_merges_body_json_field_rules_from_field_descriptions()
     assert by_name["action"].source == "body"
     assert by_name["action"].param_type == "string"
     assert "允许值 open、close" in by_name["action"].rule
+
+
+def test_parse_api_params_marks_path_parameters_from_path_template() -> None:
+    document = ApiDocument(
+        path="/api/appointments/{appointmentNo}",
+        params="appointmentNo：预约编号，路径参数，必填，string，必须存在\nstatus：状态，查询参数，选填，string",
+    )
+
+    params = parse_api_params(document)
+    by_name = {param.name: param for param in params}
+
+    assert by_name["appointmentNo"].source == "path"
+    assert by_name["status"].source == "query"
+
+
+def test_parse_api_params_supports_markdown_table_fields() -> None:
+    document = ApiDocument(
+        path="/api/material/applications/{applicationNo}",
+        params="""
+| 参数名 | 类型 | 是否必填 | 说明 |
+| --- | --- | --- | --- |
+| applicationNo | string | 是 | 路径参数，必须存在，必须属于当前用户 |
+| status | string | 否 | 查询参数，允许值 pending、approved、rejected |
+| page | integer | 否 | 查询参数，大于0 |
+""",
+    )
+
+    params = parse_api_params(document)
+    by_name = {param.name: param for param in params}
+
+    assert set(by_name) == {"applicationNo", "status", "page"}
+    assert by_name["applicationNo"].source == "path"
+    assert by_name["applicationNo"].required is True
+    assert by_name["status"].source == "query"
+    assert by_name["status"].required is False
+    assert "允许值" in by_name["status"].rule
+    assert by_name["page"].param_type == "integer"

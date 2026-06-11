@@ -43,11 +43,11 @@ def test_generate_api_cases_includes_param_level_empty_type_and_boundary_cases()
     assert any("deviceId" in case.remark and "边界" in case.remark for case in cases)
 
 
-def test_generate_api_cases_keeps_body_fields_out_of_query_params_when_duplicated() -> None:
+def test_generate_api_cases_keeps_path_and_body_fields_out_of_query_params() -> None:
     cases = generate_api_cases(_document())
     normal_case = cases[0]
 
-    assert "deviceId" in normal_case.query_params
+    assert "deviceId" not in normal_case.query_params
     assert "action" not in normal_case.query_params
     assert "mode" not in normal_case.query_params
     assert "action" in normal_case.request_body
@@ -75,11 +75,13 @@ def test_generate_api_cases_ids_are_continuous() -> None:
     assert [case.case_id for case in cases] == [f"API-01-{index:02d}" for index in range(1, len(cases) + 1)]
 
 
-def test_generate_api_cases_keeps_basic_cases_when_document_is_sparse() -> None:
-    cases = generate_api_cases(ApiDocument(api_name="示例接口"))
+def test_generate_api_cases_does_not_invent_param_or_auth_cases_when_document_is_sparse() -> None:
+    cases = generate_api_cases(ApiDocument(api_name="示例接口", method="GET", path="/api/example"))
     case_types = {case.case_type for case in cases}
 
-    assert {"正常请求", "参数校验", "鉴权校验"}.issubset(case_types)
+    assert "正常请求" in case_types
+    assert "参数校验" not in case_types
+    assert "鉴权校验" not in case_types
 
 
 def test_generate_api_cases_respects_selected_coverage_types() -> None:
@@ -95,3 +97,17 @@ def test_generate_api_cases_respects_compact_strategy() -> None:
 
     assert len(cases) <= 3
     assert all(case.case_type in {"参数校验", "边界值"} for case in cases)
+
+
+def test_generate_api_cases_formats_real_query_params_as_mapping() -> None:
+    document = ApiDocument(
+        api_name="查询预约列表接口",
+        method="GET",
+        path="/api/appointments",
+        params="status：预约状态，查询参数，选填，string，允许值 pending、cancelled\npage：页码，查询参数，选填，integer，大于0",
+    )
+
+    cases = generate_api_cases(document, coverage_types=["正常请求"])
+
+    assert "status=pending" in cases[0].query_params
+    assert "page=1" in cases[0].query_params

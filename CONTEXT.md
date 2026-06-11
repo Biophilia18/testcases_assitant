@@ -2,124 +2,85 @@
 
 ## 项目定位
 
-本项目是本地运行的 Streamlit 测试用例助手，目标是稳定完成“需求/接口文档输入 -> 用例生成 -> 表格编辑 -> 质量检查 -> Excel 导出”。
+本项目是本地运行的 Streamlit 测试用例助手，目标是让用户在真实测试场景下稳定得到一套专业、可解释、可编辑、可导出的测试设计结果。
 
-当前版本：`v0.3.4`
+当前阶段重点不是自动执行接口，而是辅助完成测试设计。
 
-当前约束：
+## 当前限制
 
 - 不引入 RAG、数据库、FastAPI、独立前端框架。
-- 不做 Swagger/OpenAPI 解析。
-- 不生成 pytest 接口自动化脚本。
+- 不做 Swagger/OpenAPI、Postman 解析。
+- 不真实执行接口。
+- 不生成 pytest 自动化脚本。
 - 不提交 `.env` 或真实 API Key。
 
-## 当前能力
+## 功能测试模式
 
-功能测试模式：
+入口仍在 Streamlit 主页面中。
 
-- 支持 `.txt` / `.md` / `.docx` 需求上传和模板填写。
-- 支持规则生成和 AI 生成，AI 失败自动回退规则生成。
-- 支持生成前功能点预览和勾选。
-- 支持用例编辑、单功能点重新生成、质量评分、覆盖提示矩阵。
-- 支持 JSON 历史保存/导入和 Excel 双 sheet 导出。
+主要能力：
 
-接口测试模式：
+- 需求文本/文件输入。
+- 功能点识别和生成前预览。
+- 规则生成与 AI 生成。
+- 可编辑表格。
+- 质量评分、覆盖提示、质量报告。
+- JSON 保存/导入和 Excel 导出。
 
-- 入口位于 `src/api/ui.py`，`app.py` 只负责模式选择和调用。
-- 支持 `.txt` / `.md` 接口文档上传或粘贴。
-- 支持接口字段解析和手动修正。
-- 支持参数解析：参数名、必填、类型、规则、来源。
-- 支持参数级规则生成：必填为空、类型错误、边界/非法值。
-- 支持正常、鉴权、权限、业务规则、幂等、响应断言、数据库校验用例。
-- 支持接口覆盖提示矩阵、接口质量检查、表格编辑。
-- 接口 Excel 包含 `接口测试用例` 和 `接口质量报告`。
+## 接口测试模式
 
-## 当前结构
+入口位于 `src/api/ui.py`。
 
-```text
-app.py
-src/
-  api/
-    coverage_analyzer.py
-    document_parser.py
-    exporter.py
-    models.py
-    param_parser.py
-    quality_checker.py
-    rule_generator.py
-    table_adapter.py
-    ui.py
-  ai_client.py
-  coverage_analyzer.py
-  coverage_config.py
-  document_loader.py
-  exporter.py
-  feature_selection.py
-  filename_utils.py
-  generation_preview.py
-  models.py
-  persistence.py
-  prompt_manager.py
-  quality_checker.py
-  quality_score.py
-  regeneration.py
-  requirement_parser.py
-  rule_based_generator.py
-  table_adapter.py
-  text_utils.py
-  title_utils.py
-tests/
-examples/
-prompts/
-outputs/
-```
+当前定位：单接口测试设计工作台。
+
+主要能力：
+
+- txt/md 接口文档粘贴或上传。
+- 示例文档一键填充。
+- 单接口字段解析与手动修正。
+- 模块级多接口文档识别为接口清单，但不批量生成。
+- 接口清单展示参数数、鉴权、业务规则、数据库校验、复杂度。
+- 选择一个接口后进入单接口生成流程。
+- 生成前做接口文档可信度检查：缺少请求方法或接口路径时禁用生成；缺少参数、鉴权、响应示例或业务规则时只提示，不凭空生成对应测试点。
+- 参数解析支持普通文本和 Markdown 表格，并区分 path/query/body，避免路径参数进入 query。
+- 生成前预览与高级设计选项。
+- 参数风险、业务规则、计划项驱动生成。
+- 用例标题、接口字段、断言、数据库校验、变量提取。
+- Excel 导出和 `api_auto` YAML 草稿导出。
+
+`api_auto` YAML 只是草稿，需要人工补充 token、环境变量、复杂断言、数据库 SQL 和测试数据。
 
 ## 关键文件
 
-- `app.py`：Streamlit 入口和模式选择。
-- `src/api/ui.py`：接口测试页面 5 步流程。
-- `src/api/models.py`：接口用例模型和接口 Excel 列定义。
-- `src/api/document_parser.py`：接口文档标题解析。
-- `src/api/param_parser.py`：接口参数解析。
-- `src/api/rule_generator.py`：接口规则生成。
-- `src/api/quality_checker.py`：接口质量检查。
-- `src/api/coverage_analyzer.py`：接口覆盖提示矩阵。
-- `src/api/exporter.py`：接口 Excel 双 sheet 导出。
-- `src/models.py`：功能测试用例模型。
-- `src/rule_based_generator.py`：功能测试规则生成。
-- `src/ai_client.py`：DeepSeek/OpenAI 调用和回退。
-
-## 接口用例字段
-
 ```text
-用例编号、模块、接口名称、请求方法、接口路径、请求头、请求参数、请求体、
-前置条件、操作步骤、预期状态码、断言点、数据库校验、变量提取、
-优先级、用例类型、备注
+app.py                         Streamlit 入口
+src/api/ui.py                  接口测试页面
+src/api/document_parser.py     单接口文档解析
+src/api/document_candidates.py 多接口候选识别
+src/api/examples.py            内置接口示例
+src/api/param_parser.py        参数解析
+src/api/reliability.py         接口文档可信度检查
+src/api/design_plan.py         测试设计计划
+src/api/rule_generator.py      接口规则生成
+src/api/api_auto_exporter.py   api_auto YAML 草稿导出
+src/api/exporter.py            接口 Excel 导出
+tests/                         pytest 测试
+examples/                      示例需求和接口文档
 ```
 
-## 验证方式
-
-全量测试：
+## 验证命令
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q
 ```
 
-最近一次重构后测试结果：`94 passed`。
+最近目标测试结果：全部通过。
 
-人工验证重点：
+## 下一步建议
 
-- 功能测试页面能正常进入、预览、生成、编辑、导出。
-- 接口测试页面能上传 `examples/api_smart_home_device_control.md` 并生成用例。
-- 接口 Excel 应包含 `接口测试用例` 和 `接口质量报告`。
+优先继续小步稳定接口模式：
 
-## 当前下一步
-
-建议先稳定现有结构，不继续新增大功能。
-
-可选后续：
-
-- 统一功能测试和接口测试的历史 JSON 管理。
-- 提升接口参数解析对表格化字段说明的支持。
-- 观察接口规则生成结果，减少误判和重复用例。
-- 稳定后再考虑功能测试模块继续分包。
+1. 优化接口清单选择体验。
+2. 继续补充真实接口文档回归样本。
+3. 增强 `api_auto` YAML 草稿就绪度检查。
+4. 稳定后再做结构分包和文档重整。

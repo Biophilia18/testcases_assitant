@@ -69,6 +69,34 @@ def test_parse_api_document_supports_markdown_titles_and_list_markers() -> None:
     assert document.business_rules.splitlines() == ["服务类型不能为空", "预约时间不能早于当前时间"]
 
 
+def test_parse_api_document_supports_common_title_aliases() -> None:
+    text = """
+项目名称：物资后勤管理系统
+模块：申请查询
+接口名称：查询申请详情
+请求方式：get
+接口地址：/api/material/applications/{applicationNo}
+鉴权：Bearer Token
+请求入参：
+applicationNo：申请编号，必填，string，必须存在
+返回示例：
+{"code":0,"data":{"applicationNo":"WL202606090001"}}
+错误码：
+404 application not found
+数据库校验：
+查询接口不应修改数据
+"""
+
+    document = parse_api_document(text)
+
+    assert document.project_name == "物资后勤管理系统"
+    assert document.method == "GET"
+    assert document.path == "/api/material/applications/{applicationNo}"
+    assert "applicationNo" in document.params
+    assert "application not found" in document.response_example
+    assert "不应修改数据" in document.db_checks
+
+
 def test_parse_empty_api_document_returns_empty_model() -> None:
     document = parse_api_document("")
 

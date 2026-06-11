@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from src.api.coverage_analyzer import API_COVERAGE_ITEMS
 from src.api.models import ApiDocument
 from src.api.param_parser import ApiParam, parse_api_params
+from src.api.reliability import document_has_auth
 
 
 API_GENERATION_STRATEGIES = ["精简", "标准", "完整"]
@@ -128,17 +129,17 @@ def build_api_plan_items(
                     coverage_type="参数校验",
                     source_type="fixed",
                     source_name="关键参数",
-                    risk_type="参数缺失",
-                    suggested_test_point="选择一个关键参数置为空，验证参数校验。",
-                    estimated_count=1,
-                    included=True,
+                    risk_type="参数信息不足",
+                    suggested_test_point="接口文档未说明请求参数，需人工补充参数后再生成参数校验用例。",
+                    estimated_count=0,
+                    included=False,
                 )
             )
 
-    if "鉴权校验" in selected_coverage:
+    if "鉴权校验" in selected_coverage and document_has_auth(document):
         items.append(_fixed_item("PLAN-AUTH-001", "鉴权校验", "鉴权信息", "未鉴权", "移除 Token 或鉴权信息"))
 
-    if "权限校验" in selected_coverage and document.auth.strip():
+    if "权限校验" in selected_coverage and document_has_auth(document):
         items.append(_fixed_item("PLAN-PERM-001", "权限校验", "权限角色", "权限不足", "使用低权限账号或非授权资源"))
 
     if "业务规则" in selected_coverage:

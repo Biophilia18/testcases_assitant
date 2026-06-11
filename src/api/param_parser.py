@@ -19,16 +19,30 @@ class ApiParam:
 
 def parse_api_params(document: ApiDocument) -> list[ApiParam]:
     params: list[ApiParam] = []
-    params.extend(_parse_text_params(document.params, "query"))
+    path_param_names = _path_param_names(document.path)
+    params.extend(_parse_text_params(document.params, "query", path_param_names=path_param_names))
     params.extend(_parse_body_params(document.body))
     return _merge_params(params)
 
 
-def _parse_text_params(text: str, source: str) -> list[ApiParam]:
+def _parse_text_params(text: str, source: str, path_param_names: set[str] | None = None) -> list[ApiParam]:
     params: list[ApiParam] = []
+    path_param_names = path_param_names or set()
+    table_headers: list[str] = []
     for raw_line in text.splitlines():
         line = _clean_line(raw_line)
         if not line or line in {"无", "none", "None"}:
+            continue
+        if _is_markdown_table_separator(line):
+            continue
+        if _is_markdown_table_row(line):
+            cells = _table_cells(line)
+            if _looks_like_table_header(cells):
+                table_headers = cells
+                continue
+            table_param = _parse_table_param(cells, table_headers, source, path_param_names)
+            if table_param:
+                params.append(table_param)
             continue
 
         name, description = _split_name_and_description(line)
@@ -41,10 +55,94 @@ def _parse_text_params(text: str, source: str) -> list[ApiParam]:
                 required=_is_required(description),
                 param_type=_detect_type(description),
                 rule=_extract_rule(description),
-                source=source,
+                source=_detect_source(name, description, source, path_param_names),
             )
         )
     return params
+
+
+def _is_markdown_table_row(line: str) -> bool:
+    return line.startswith("|") and line.endswith("|") and line.count("|") >= 2
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    if not _is_markdown_table_row(line):
+        return False
+    value = line.replace("|", "").replace(":", "").replace("-", "").strip()
+    return value == ""
+
+
+def _table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _looks_like_table_header(cells: list[str]) -> bool:
+    joined = " ".join(cells)
+    return any(keyword in joined for keyword in ["参数名", "字段名", "字段", "名称"]) and any(
+        keyword in joined for keyword in ["类型", "必填", "说明", "描述"]
+    )
+
+
+def _parse_table_param(
+    cells: list[str],
+    headers: list[str],
+    source: str,
+    path_param_names: set[str],
+) -> ApiParam | None:
+    if not cells:
+        return None
+
+    field_map = _table_field_map(cells, headers)
+    name = _clean_name(field_map.get("name", cells[0] if cells else ""))
+    if not name or name in {"参数名", "字段名", "字段", "名称"}:
+        return None
+
+    description_parts = [
+        field_map.get("required", ""),
+        field_map.get("type", ""),
+        field_map.get("description", ""),
+        " ".join(cells[1:]) if not headers else "",
+    ]
+    description = "，".join(part for part in description_parts if part).strip()
+    required_text = field_map.get("required", "")
+    return ApiParam(
+        name=name,
+        required=_is_required_from_table(required_text, description),
+        param_type=_detect_type(description),
+        rule=_extract_rule(description),
+        source=_detect_source(name, description, source, path_param_names),
+    )
+
+
+def _table_field_map(cells: list[str], headers: list[str]) -> dict[str, str]:
+    if not headers:
+        return {"name": cells[0], "description": "，".join(cells[1:])}
+
+    result: dict[str, str] = {}
+    for index, header in enumerate(headers):
+        if index >= len(cells):
+            continue
+        value = cells[index]
+        if any(keyword in header for keyword in ["参数名", "字段名", "名称"]):
+            result["name"] = value
+        elif "类型" in header:
+            result["type"] = value
+        elif any(keyword in header for keyword in ["必填", "是否必填", "是否必须", "必需"]):
+            result["required"] = value
+        elif any(keyword in header for keyword in ["说明", "描述", "规则", "备注"]):
+            result["description"] = value
+    if "description" not in result:
+        result["description"] = "，".join(cells[1:])
+    return result
+
+
+def _is_required_from_table(required_text: str, description: str) -> bool:
+    text = f"{required_text} {description}".strip()
+    if required_text.strip() in {"否", "N", "n", "No", "no", "false", "False"}:
+        return False
+    if required_text.strip() in {"是", "Y", "y", "Yes", "yes", "true", "True"}:
+        return True
+    return _is_required(text)
 
 
 def _parse_body_params(body: str) -> list[ApiParam]:
@@ -116,6 +214,21 @@ def _split_name_and_description(line: str) -> tuple[str, str]:
             name, description = normalized.split(separator, 1)
             return _clean_name(name), description.strip()
     return _clean_name(normalized), normalized
+
+
+def _path_param_names(path: str) -> set[str]:
+    return {match.strip() for match in re.findall(r"\{([^{}]+)\}", path or "") if match.strip()}
+
+
+def _detect_source(name: str, description: str, fallback_source: str, path_param_names: set[str]) -> str:
+    lowered = description.lower()
+    if name in path_param_names or any(keyword in description for keyword in ["路径参数", "路径变量"]) or "path" in lowered:
+        return "path"
+    if any(keyword in description for keyword in ["请求体", "body", "json"]):
+        return "body"
+    if any(keyword in description for keyword in ["查询参数", "query"]):
+        return "query"
+    return fallback_source
 
 
 def _clean_line(line: str) -> str:

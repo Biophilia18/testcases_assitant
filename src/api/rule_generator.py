@@ -358,7 +358,7 @@ def _valid_params(document: ApiDocument) -> str:
     query_params = [param for param in parse_api_params(document) if param.source == "query"]
     if query_params:
         return "\n".join(_format_param(param) for param in query_params)
-    return document.params.strip() or "按接口文档填写合法请求参数"
+    return ""
 
 
 def _valid_body(document: ApiDocument) -> str:
@@ -366,9 +366,10 @@ def _valid_body(document: ApiDocument) -> str:
 
 
 def _invalid_params(document: ApiDocument, note: str) -> str:
-    if document.params.strip():
-        return f"{document.params.strip()}\n测试处理：{note}"
-    return f"按接口文档选择一个必填参数，测试处理：{note}"
+    valid_params = _valid_params(document)
+    if valid_params:
+        return f"{valid_params}\n测试处理：{note}"
+    return ""
 
 
 def _invalid_body(document: ApiDocument, note: str) -> str:
@@ -411,11 +412,33 @@ def _auth_remark(document: ApiDocument, fallback: str) -> str:
 
 
 def _format_param(param: ApiParam) -> str:
-    parts = [param.name]
-    if param.required:
-        parts.append("必填")
-    if param.param_type:
-        parts.append(param.param_type)
-    if param.rule:
-        parts.append(param.rule)
-    return "，".join(parts)
+    return f"{param.name}={_sample_param_value(param)}"
+
+
+def _sample_param_value(param: ApiParam) -> str:
+    rule = param.rule
+    if "手机号" in rule or "电话" in param.name:
+        return "13800000000"
+    if param.param_type == "integer":
+        return "1"
+    if param.param_type == "number":
+        return "1.0"
+    if param.param_type == "boolean":
+        return "true"
+    if any(keyword in rule for keyword in ["yyyy-MM-dd", "日期"]) or param.param_type == "date":
+        return "2026-06-10"
+    enum_value = _first_enum_value(rule)
+    if enum_value:
+        return enum_value
+    return f"${{{param.name}}}"
+
+
+def _first_enum_value(rule: str) -> str:
+    for marker in ["允许值", "枚举", "取值"]:
+        if marker in rule:
+            value = rule.split(marker, 1)[1].strip(" ：:，,")
+            for separator in ["、", ",", "，", "/", " "]:
+                if separator in value:
+                    value = value.split(separator, 1)[0]
+            return value.strip()
+    return ""
