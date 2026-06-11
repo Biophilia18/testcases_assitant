@@ -91,3 +91,13 @@ def test_build_generation_preview_counts_selected_coverage_types():
     assert preview.coverage_types == ["正常流程", "弱网/超时"]
     assert preview.cases_per_feature == 2
     assert preview.estimated_case_count == len(preview.feature_items) * 2
+
+
+def test_build_generation_preview_warns_when_rules_look_like_features():
+    preview = build_generation_preview(
+        STRUCTURED_REQUIREMENT,
+        cases_per_feature=3,
+    )
+
+    assert any("更像验收标准" in warning for warning in preview.warnings)
+    assert any("主功能点建议只保留业务流程" in warning for warning in preview.warnings)

@@ -85,6 +85,24 @@ def test_strategy_changes_plan_item_count() -> None:
     assert len(compact_items) < len(standard_items) <= len(full_items)
 
 
+def test_strategy_limit_marks_extra_plan_items_as_not_included() -> None:
+    document = ApiDocument(
+        api_name="批量校验接口",
+        method="POST",
+        path="/api/batch",
+        params="\n".join([f"field{index}：字段{index}，必填，string，长度1-30" for index in range(1, 10)]),
+        auth="Bearer Token",
+        response_example='{"code":0}',
+        business_rules="\n".join([f"业务规则{index}" for index in range(1, 5)]),
+        db_checks="\n".join([f"数据库校验{index}" for index in range(1, 5)]),
+    )
+
+    plan = build_api_design_plan(document, strategy="精简")
+
+    assert plan.estimated_case_count <= 10
+    assert any(not item.included and item.estimated_count == 0 for item in plan.plan_items)
+
+
 def test_estimated_count_matches_actual_generated_count() -> None:
     plan = build_api_design_plan(_document(), strategy="标准")
     cases = generate_api_cases(_document(), plan_items=plan.plan_items)

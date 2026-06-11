@@ -22,6 +22,7 @@
 
 - 需求文本/文件输入。
 - 功能点识别和生成前预览。
+- 生成前预览会提示疑似验收标准、异常规则、数据库校验被误当成功能点的情况，用户可在表格中取消。
 - 规则生成与 AI 生成。
 - 可编辑表格。
 - 质量评分、覆盖提示、质量报告。
@@ -45,6 +46,7 @@
 - 参数解析支持普通文本和 Markdown 表格，并区分 path/query/body，避免路径参数进入 query。
 - 生成前预览与高级设计选项。
 - 参数风险、业务规则、计划项驱动生成。
+- 接口生成结果会去重、按策略上限控制数量并重新编号。
 - 用例标题、接口字段、断言、数据库校验、变量提取。
 - Excel 导出和 `api_auto` YAML 草稿导出。
 
@@ -60,6 +62,7 @@ src/api/document_candidates.py 多接口候选识别
 src/api/examples.py            内置接口示例
 src/api/param_parser.py        参数解析
 src/api/reliability.py         接口文档可信度检查
+src/api/case_stabilizer.py     接口用例去重、上限和重编号
 src/api/design_plan.py         测试设计计划
 src/api/rule_generator.py      接口规则生成
 src/api/api_auto_exporter.py   api_auto YAML 草稿导出
@@ -81,6 +84,5 @@ examples/                      示例需求和接口文档
 优先继续小步稳定接口模式：
 
 1. 优化接口清单选择体验。
-2. 继续补充真实接口文档回归样本。
-3. 增强 `api_auto` YAML 草稿就绪度检查。
-4. 稳定后再做结构分包和文档重整。
+2. 增强 `api_auto` YAML 草稿就绪度检查。
+3. 稳定后再做结构分包和文档重整。

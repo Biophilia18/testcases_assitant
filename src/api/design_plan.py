@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.api.case_stabilizer import API_STRATEGY_CASE_LIMITS
 from src.api.coverage_analyzer import API_COVERAGE_ITEMS
 from src.api.models import ApiDocument
 from src.api.param_parser import ApiParam, parse_api_params
@@ -180,7 +181,7 @@ def build_api_plan_items(
                     included=True,
                 )
             )
-    return items
+    return _apply_strategy_case_limit(items, normalized_strategy)
 
 
 def analyze_param_risks(document: ApiDocument) -> list[ApiParamRisk]:
@@ -344,6 +345,33 @@ def _fixed_item(
         estimated_count=1,
         included=True,
     )
+
+
+def _apply_strategy_case_limit(items: list[ApiPlanItem], strategy: str) -> list[ApiPlanItem]:
+    limit = API_STRATEGY_CASE_LIMITS.get(strategy, API_STRATEGY_CASE_LIMITS["标准"])
+    included_count = 0
+    limited_items: list[ApiPlanItem] = []
+    for item in items:
+        if not item.included:
+            limited_items.append(item)
+            continue
+        if included_count + item.estimated_count <= limit:
+            included_count += item.estimated_count
+            limited_items.append(item)
+            continue
+        limited_items.append(
+            ApiPlanItem(
+                plan_id=item.plan_id,
+                coverage_type=item.coverage_type,
+                source_type=item.source_type,
+                source_name=item.source_name,
+                risk_type=item.risk_type,
+                suggested_test_point=f"{item.suggested_test_point}（因{strategy}策略上限暂不参与生成）",
+                estimated_count=0,
+                included=False,
+            )
+        )
+    return limited_items
 
 
 def _param_to_risk(param: ApiParam) -> ApiParamRisk:

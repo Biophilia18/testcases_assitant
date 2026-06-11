@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.api.case_stabilizer import stabilize_api_cases
 from src.api.design_plan import ApiPlanItem, build_api_plan_items
 from src.api.models import ApiDocument, ApiTestCase
 from src.api.param_parser import ApiParam, parse_api_params
@@ -19,10 +20,14 @@ def generate_api_cases(
             strategy=strategy,
             included_business_rules=business_rules,
         )
-    return generate_api_cases_from_plan(document, plan_items)
+    return generate_api_cases_from_plan(document, plan_items, strategy=strategy)
 
 
-def generate_api_cases_from_plan(document: ApiDocument, plan_items: list[ApiPlanItem]) -> list[ApiTestCase]:
+def generate_api_cases_from_plan(
+    document: ApiDocument,
+    plan_items: list[ApiPlanItem],
+    strategy: str = "标准",
+) -> list[ApiTestCase]:
     cases: list[ApiTestCase] = []
     params = parse_api_params(document)
 
@@ -141,7 +146,7 @@ def generate_api_cases_from_plan(document: ApiDocument, plan_items: list[ApiPlan
                 priority="P2",
                 remark=_plan_remark(item, "数据库校验。需要测试环境提供可核查的数据表或查询方式。"),
             )
-    return cases
+    return stabilize_api_cases(cases, strategy=strategy)
 
 
 def _append_plan_param_case(
