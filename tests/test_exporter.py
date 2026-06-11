@@ -128,3 +128,31 @@ def test_build_excel_quality_report_records_coverage_types():
 
     assert sheet["A5"].value == "覆盖类型"
     assert sheet["B5"].value == "正常流程、弱网/超时"
+
+
+def test_build_excel_quality_report_can_include_requirement_trace():
+    case = TestCase(
+        case_id="TC-01-01",
+        module="订单",
+        feature="查询订单",
+        title="查询订单-正常流程",
+        precondition="用户已登录",
+        test_data="订单号：A001",
+        steps="1. 查询订单\n2. 查看详情",
+        expected_result="展示订单详情。",
+        priority="P1",
+        case_type="功能测试",
+        remark="覆盖类型：正常流程",
+    )
+    requirement_text = """
+验收标准：
+1. 查询成功后展示订单详情。
+"""
+
+    data = build_excel([case], requirement_text=requirement_text)
+    workbook = load_workbook(BytesIO(data))
+    sheet = workbook["质量报告"]
+    values = [cell.value for row in sheet.iter_rows() for cell in row if cell.value]
+
+    assert "需求规则覆盖追踪" in values
+    assert "查询成功后展示订单详情" in values

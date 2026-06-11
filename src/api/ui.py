@@ -16,6 +16,7 @@ from src.api.design_plan import (
 from src.api.document_candidates import api_document_candidates_to_rows, candidate_complexity_label, extract_api_document_candidates
 from src.api.document_parser import api_document_to_fields, fields_to_api_document, parse_api_document
 from src.api.examples import API_EXAMPLE_BY_NAME, API_EXAMPLE_DOCUMENTS
+from src.api.export_review import api_export_review_summary, api_export_review_to_rows, build_api_export_review
 from src.api.exporter import build_api_excel
 from src.api.models import ApiDocument, ApiTestCase
 from src.api.param_parser import parse_api_params
@@ -379,6 +380,7 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
         value=st.session_state.get("api_export_filename", _build_api_export_filename(document.project_name, document.module)),
         key="api_export_filename",
     )
+    _render_api_export_review_panel(cases, document)
     st.download_button(
         f"导出接口 Excel（{len(cases)} 条，含质量报告）",
         data=build_api_excel(cases, document=document),
@@ -403,6 +405,31 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
             file_name=yaml_filename,
             mime="text/yaml",
         )
+
+
+def _render_api_export_review_panel(cases: list[ApiTestCase], document: ApiDocument) -> None:
+    review_items = build_api_export_review(cases, document)
+    summary = api_export_review_summary(review_items)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("导出复核项", summary["total"])
+    col2.metric("错误", summary["error_count"])
+    col3.metric("警告", summary["warning_count"])
+    col4.metric("建议", summary["suggestion_count"])
+
+    if not review_items:
+        st.success("导出前复核未发现明显问题。仍建议抽查真实 token、测试数据和断言。")
+        return
+
+    if summary["error_count"]:
+        st.error("存在导出前需要优先处理的错误。Excel 仍可导出，但建议先修复。")
+    elif summary["warning_count"]:
+        st.warning("存在导出前建议复核的接口风险项。请确认后再交付或执行。")
+    else:
+        st.info("存在一些人工复核建议，可按实际项目要求取舍。")
+
+    with st.expander("导出前复核清单", expanded=bool(summary["error_count"] or summary["warning_count"])):
+        st.dataframe(api_export_review_to_rows(review_items), use_container_width=True, hide_index=True)
 
 
 def _render_api_progress_summary() -> None:

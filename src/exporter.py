@@ -8,10 +8,11 @@ from openpyxl.utils import get_column_letter
 
 from src.models import COLUMN_TO_FIELD, EXCEL_COLUMNS, TestCase
 from src.quality_checker import build_quality_report_rows
+from src.requirement_trace import build_requirement_trace, requirement_trace_to_rows
 from src.text_utils import normalize_steps
 
 
-def build_excel(cases: list[TestCase], coverage_types: list[str] | None = None) -> bytes:
+def build_excel(cases: list[TestCase], coverage_types: list[str] | None = None, requirement_text: str = "") -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "测试用例"
@@ -22,7 +23,7 @@ def build_excel(cases: list[TestCase], coverage_types: list[str] | None = None) 
         sheet.append([_cell_value(case, column) for column in EXCEL_COLUMNS])
 
     _style_sheet(sheet)
-    _build_quality_sheet(workbook, cases, coverage_types)
+    _build_quality_sheet(workbook, cases, coverage_types, requirement_text)
 
     output = BytesIO()
     workbook.save(output)
@@ -101,10 +102,23 @@ def _estimate_row_height(row) -> int:
     return min(max(36, max_lines * 22), 120)
 
 
-def _build_quality_sheet(workbook: Workbook, cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
+def _build_quality_sheet(
+    workbook: Workbook,
+    cases: list[TestCase],
+    coverage_types: list[str] | None = None,
+    requirement_text: str = "",
+) -> None:
     sheet = workbook.create_sheet("质量报告")
     for row in build_quality_report_rows(cases, coverage_types):
         sheet.append(row)
+
+    trace_items = build_requirement_trace(cases, requirement_text)
+    if trace_items:
+        sheet.append([])
+        sheet.append(["需求规则覆盖追踪"])
+        sheet.append(["来源", "规则内容", "是否覆盖", "命中用例", "建议"])
+        for row in requirement_trace_to_rows(trace_items):
+            sheet.append([row["来源"], row["规则内容"], row["是否覆盖"], row["命中用例"], row["建议"]])
 
     header_fill = PatternFill("solid", fgColor="70AD47")
     header_font = Font(color="FFFFFF", bold=True)
@@ -113,6 +127,12 @@ def _build_quality_sheet(workbook: Workbook, cases: list[TestCase], coverage_typ
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for row in sheet.iter_rows():
+        if row[0].value in {"需求规则覆盖追踪", "来源"}:
+            for cell in row:
+                cell.fill = header_fill
+                cell.font = header_font
 
     for column_index in range(1, sheet.max_column + 1):
         sheet.column_dimensions[get_column_letter(column_index)].width = 22 if column_index < 3 else 50

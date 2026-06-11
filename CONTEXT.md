@@ -26,6 +26,8 @@
 - 规则生成与 AI 生成。
 - 可编辑表格。
 - 质量评分、覆盖提示、质量报告。
+- 需求规则覆盖追踪：追踪验收标准和补充规则/异常场景是否被当前用例命中。
+- 导出前复核清单：汇总错误、警告、建议，提前暴露覆盖缺口和人工复核项。
 - JSON 保存/导入和 Excel 导出。
 
 ## 接口测试模式
@@ -48,6 +50,7 @@
 - 参数风险、业务规则、计划项驱动生成。
 - 接口生成结果会去重、按策略上限控制数量并重新编号。
 - 用例标题、接口字段、断言、数据库校验、变量提取。
+- 导出前复核清单：汇总文档可信度、质量检查、覆盖缺口、token/数据库/断言人工复核项。
 - Excel 导出和 `api_auto` YAML 草稿导出。
 
 `api_auto` YAML 只是草稿，需要人工补充 token、环境变量、复杂断言、数据库 SQL 和测试数据。
@@ -66,7 +69,10 @@ src/api/case_stabilizer.py     接口用例去重、上限和重编号
 src/api/design_plan.py         测试设计计划
 src/api/rule_generator.py      接口规则生成
 src/api/api_auto_exporter.py   api_auto YAML 草稿导出
+src/api/export_review.py       接口导出前复核清单
 src/api/exporter.py            接口 Excel 导出
+src/export_review.py           功能测试导出前复核清单
+src/requirement_trace.py       功能测试需求规则覆盖追踪
 tests/                         pytest 测试
 examples/                      示例需求和接口文档
 ```

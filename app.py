@@ -8,6 +8,7 @@ from src.ai_client import generate_cases, is_provider_configured
 from src.coverage_analyzer import build_coverage_matrix, coverage_matrix_to_rows
 from src.coverage_config import COVERAGE_TYPE_OPTIONS, DEFAULT_COVERAGE_TYPES, normalize_coverage_types
 from src.document_loader import load_requirement_document
+from src.export_review import build_export_review, export_review_summary, export_review_to_rows
 from src.exporter import build_excel
 from src.feature_selection import count_selected_rows, feature_items_to_rows, selected_rows_to_feature_source
 from src.filename_utils import build_export_filename
@@ -29,6 +30,7 @@ from src.regeneration import (
     replace_group_preserving_case_ids,
 )
 from src.requirement_parser import parse_requirement_text
+from src.requirement_trace import build_requirement_trace, requirement_trace_summary, requirement_trace_to_rows
 from src.table_adapter import cases_to_rows, find_case_warnings, rows_to_cases
 from src.api.ui import render_api_test_page
 
@@ -438,18 +440,25 @@ def _render_quality_tab(cases: list[TestCase], coverage_types: list[str] | None 
     matrix = build_coverage_matrix(cases, matrix_types)
     st.caption("覆盖检查：" + "、".join(matrix_types))
     issues = check_cases(cases, matrix_types)
+    trace_items = build_requirement_trace(cases, st.session_state.get("last_requirement_text", ""))
+    trace_summary = requirement_trace_summary(trace_items)
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("质量评分", score.score)
     col2.metric("总用例数", len(cases))
     col3.metric("功能点数", len(_group_cases(cases)))
     col4.metric("质量提示", len(issues))
     col5.metric("覆盖项", f"{sum(1 for item in matrix if item.covered)}/{len(matrix)}")
-    col6.metric("P1/P0", sum(1 for case in cases if case.priority in {"P0", "P1"}))
+    col6.metric("规则追踪", f"{trace_summary['covered']}/{trace_summary['total']}" if trace_summary["total"] else "-")
     st.info(score.summary)
     st.caption("评分和覆盖提示仅用于辅助检查，最终仍需测试人员结合业务规则复核。")
 
     with st.expander("覆盖提示矩阵", expanded=False):
         st.dataframe(coverage_matrix_to_rows(matrix), use_container_width=True, hide_index=True)
+
+    if trace_items:
+        with st.expander("需求规则覆盖追踪", expanded=False):
+            st.caption("追踪范围来自需求文本中的验收标准、补充规则/异常场景。匹配结果用于辅助复核，不替代人工判断。")
+            st.dataframe(requirement_trace_to_rows(trace_items), use_container_width=True, hide_index=True)
 
     with st.expander("评分明细", expanded=False):
         _render_score_details(score)
@@ -543,6 +552,9 @@ def _render_export_tab(cases: list[TestCase], coverage_types: list[str] | None =
     st.subheader("导出")
     filename = st.session_state.get("export_filename", "测试用例.xlsx")
     st.text_input("导出文件名", value=filename, key="export_filename")
+    requirement_text = st.session_state.get("last_requirement_text", "")
+    review_items = build_export_review(cases, coverage_types=coverage_types, requirement_text=requirement_text)
+    _render_export_review_panel(review_items)
 
     result: GenerationResult | None = st.session_state.get("generation_result")
     if result and st.button("保存当前编辑结果为 JSON"):
@@ -561,13 +573,40 @@ def _render_export_tab(cases: list[TestCase], coverage_types: list[str] | None =
         save_generation_result(snapshot, st.session_state.get("export_filename", filename))
         st.success("已保存到 outputs/latest_cases.json，并生成历史快照。")
 
-    excel_bytes = build_excel(cases, coverage_types=coverage_types)
+    excel_bytes = build_excel(
+        cases,
+        coverage_types=coverage_types,
+        requirement_text=requirement_text,
+    )
     st.download_button(
         f"导出 Excel（{len(cases)} 条，含质量报告）",
         data=excel_bytes,
         file_name=st.session_state.get("export_filename", filename),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def _render_export_review_panel(review_items) -> None:
+    summary = export_review_summary(review_items)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("导出复核项", summary["total"])
+    col2.metric("错误", summary["error_count"])
+    col3.metric("警告", summary["warning_count"])
+    col4.metric("建议", summary["suggestion_count"])
+
+    if not review_items:
+        st.success("导出前复核未发现明显问题。仍建议抽查核心流程、异常场景和测试数据。")
+        return
+
+    if summary["error_count"]:
+        st.error("存在导出前需要优先处理的错误。Excel 仍可导出，但建议先修复。")
+    elif summary["warning_count"]:
+        st.warning("存在导出前建议复核的风险项。请确认后再交付或执行。")
+    else:
+        st.info("存在一些人工复核建议，可按实际项目要求取舍。")
+
+    with st.expander("导出前复核清单", expanded=bool(summary["error_count"] or summary["warning_count"])):
+        st.dataframe(export_review_to_rows(review_items), use_container_width=True, hide_index=True)
 
 
 def _render_grouped_summary(cases: list[TestCase], coverage_types: list[str] | None = None) -> None:
