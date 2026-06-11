@@ -77,6 +77,20 @@ def test_build_api_plan_items_creates_param_plan_items() -> None:
     assert any(item.risk_type == "非法枚举" and item.source_name == "action" for item in items)
 
 
+def test_build_api_plan_items_respects_empty_param_selection() -> None:
+    items = build_api_plan_items(
+        _document(),
+        coverage_types=["参数校验"],
+        strategy="完整",
+        included_param_names=[],
+    )
+
+    param_items = [item for item in items if item.source_type == "param"]
+    assert param_items
+    assert all(not item.included for item in param_items)
+    assert sum(item.estimated_count for item in items if item.included) == 0
+
+
 def test_strategy_changes_plan_item_count() -> None:
     compact_items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="精简")
     standard_items = build_api_plan_items(_document(), coverage_types=["参数校验"], strategy="标准")

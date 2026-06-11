@@ -99,6 +99,7 @@ def build_api_plan_items(
     normalized_strategy = normalize_api_strategy(strategy)
     included_rules = _included_set(included_business_rules)
     included_params = _included_set(included_param_names)
+    use_selected_params = included_param_names is not None
     param_risks = analyze_param_risks(document)
     business_rule_risks = analyze_business_rule_risks(document, included_business_rules)
     db_checks = split_api_text_items(document.db_checks)
@@ -110,7 +111,7 @@ def build_api_plan_items(
     if "参数校验" in selected_coverage:
         param_points = _select_param_plan_points(_param_plan_points(param_risks), normalized_strategy)
         for index, (risk, risk_type, test_point) in enumerate(param_points, start=1):
-            included = not included_params or risk.param_name in included_params
+            included = (risk.param_name in included_params) if use_selected_params else True
             items.append(
                 ApiPlanItem(
                     plan_id=f"PLAN-PARAM-{index:03d}",

@@ -32,6 +32,9 @@ from src.api.table_adapter import api_cases_to_rows, find_api_case_warnings, row
 from src.document_loader import load_requirement_document
 
 
+API_METHOD_OPTIONS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+
 def render_api_test_page() -> None:
     st.title("接口测试用例编辑与导出")
     st.caption("当前接口模式重点支持单个接口的测试设计：识别接口文档、生成用例、编辑复核并导出 Excel；api_auto YAML 仅作为草稿导出。")
@@ -117,7 +120,7 @@ def _render_api_step_document_confirm() -> ApiDocument:
             module = st.text_input("业务模块", key="api_module", placeholder="例如：设备控制")
             api_name = st.text_input("接口名称", key="api_name", placeholder="例如：设备控制接口")
         with col2:
-            method = st.selectbox("请求方法", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], index=1, key="api_method")
+            method = st.selectbox("请求方法", API_METHOD_OPTIONS, index=1, key="api_method")
             path = st.text_input("接口路径", key="api_path", placeholder="例如：/api/devices/{deviceId}/control")
             auth = st.text_input("鉴权方式", key="api_auth", placeholder="例如：Bearer Token / Session / 无")
 
@@ -389,7 +392,7 @@ def _render_api_step_export(cases: list[ApiTestCase], document: ApiDocument) -> 
         disabled=not cases,
     )
 
-    with st.expander("api_auto YAML 导出预览", expanded=bool(cases)):
+    with st.expander("api_auto YAML 导出预览", expanded=False):
         if not cases:
             st.info("生成接口测试用例后，这里会展示可供 api_auto 使用的 YAML 预览。")
             return
@@ -735,9 +738,14 @@ def _apply_api_document_to_state(document: ApiDocument) -> None:
     fields = api_document_to_fields(document)
     for field, key in field_to_key.items():
         value = fields.get(field, "")
-        if field == "method" and value not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-            value = "POST"
+        if field == "method":
+            value = _api_method_for_select(value)
         st.session_state[key] = value
+
+
+def _api_method_for_select(value: str) -> str:
+    method = str(value or "").strip().upper()
+    return method if method in API_METHOD_OPTIONS else "POST"
 
 
 def _api_document_preview_rows(document: ApiDocument) -> list[dict[str, str]]:

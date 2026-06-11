@@ -44,3 +44,19 @@ def test_build_api_auto_preview_rows_marks_ready_cases() -> None:
 
     assert rows[0]["用例标题"] == "正常请求-创建设备成功"
     assert rows[0]["自动化就绪"] == "可导出"
+
+
+def test_build_api_auto_yaml_exports_query_params_as_params() -> None:
+    case = _api_case()
+    case.method = "GET"
+    case.path = "/api/devices"
+    case.query_params = "status=open\npage=1"
+    case.request_body = ""
+
+    yaml_text = build_api_auto_yaml([case], ApiDocument())
+
+    assert "url: /api/devices" in yaml_text
+    assert "url: /api/devices?" not in yaml_text
+    assert "params:" in yaml_text
+    assert "status: open" in yaml_text
+    assert "page: 1" in yaml_text

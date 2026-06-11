@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
-from urllib.parse import urlencode
 
 from src.api.models import ApiDocument, ApiTestCase
 
@@ -35,11 +34,15 @@ def build_api_auto_preview_rows(cases: list[ApiTestCase]) -> list[dict[str, str]
 def _case_to_api_auto_dict(case: ApiTestCase, document: ApiDocument) -> dict[str, Any]:
     request: dict[str, Any] = {
         "method": (case.method or document.method or "GET").lower(),
-        "url": _url_with_query(case.path or document.path, case.query_params),
+        "url": (case.path or document.path or "/").strip(),
     }
     headers = _parse_mapping(case.headers or document.headers)
     if headers:
         request["headers"] = headers
+
+    params = _parse_mapping(case.query_params)
+    if params:
+        request["params"] = params
 
     body = _parse_json_object(case.request_body)
     if body:
@@ -108,15 +111,6 @@ def _db_validate_rule(case: ApiTestCase) -> dict[str, dict[str, Any]]:
             "expect": [],
         }
     }
-
-
-def _url_with_query(path: str, query_params: str) -> str:
-    path = path.strip() or "/"
-    params = _parse_mapping(query_params)
-    if not params:
-        return path
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}{urlencode(params)}"
 
 
 def _parse_mapping(text: str) -> dict[str, Any]:
